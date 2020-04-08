@@ -1,0 +1,14 @@
+starlette
+authlib
+pydantic
+oyaml
+passlib
+fastapi
+pymongo
+aiofiles
+httpx
+itsdangerous
+argon2_cffi
+python-multipart
+cryptography
+dateutils

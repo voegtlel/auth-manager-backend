@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+    function getCookie(name) {
+        var cookies = document.cookie.split(';');
+        for(var i = 0; i < cookies.length; i++) {
+            var cookie = cookies[i].trim();
+            if (cookie.indexOf(name) === 0) return cookie.substring(name.length, cookie.length);
+        }
+        return null;
+    }
+
+    var sid = getCookie('OAUTH_SID=');
+    var state = getCookie('OAUTH_STATE=');
+
+    function receiveMessage(event) {
+        if (typeof event.data !== 'string') {
+            event.source.postMessage('error', origin);
+            return;
+        }
+
+        var origin = event.origin;
+        var data = event.data.split(' ');
+        if (data.length != 2) {
+            event.source.postMessage('error', origin);
+            return;
+        }
+
+        var clientId = data[0];
+        var sessionState = data[1];
+
+        var currentSid = getCookie('OAUTH_SID=')
+        var currentState = getCookie('OAUTH_STATE=')
+
+        if (state !== currentState || sid !== currentSid || sessionState !== currentState) {
+            state = currentState;
+            sid = currentSid;
+            event.source.postMessage('changed', origin);
+        } else {
+            event.source.postMessage('unchanged', origin);
+        }
+    }
+
+    window.addEventListener("message", receiveMessage, false);
+</script>
+</body>
+</html>
