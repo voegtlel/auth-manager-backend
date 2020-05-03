@@ -1,29 +1,32 @@
 import re
 from datetime import datetime
-from time import time
 from typing import List, Optional
 
+import pytz
 from authlib.oauth2.rfc6749 import (
     TokenMixin,
     ClientMixin)
 from authlib.oauth2.rfc6749.util import list_to_scope, scope_to_list
 from authlib.oidc.core import AuthorizationCodeMixin
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, Extra
 from pymongo import IndexModel, HASHED, ASCENDING
 
 
-class BaseCollection(BaseModel):
-    __indexes__: List[IndexModel] = []
-    __collection_name__: str
-
+class BaseSubDocument(BaseModel):
     class Config:
         allow_population_by_field_name = True
         validate_assignment = True
 
 
-class AuthorizationCode(BaseCollection, AuthorizationCodeMixin):
+class BaseDocument(BaseSubDocument):
+    __indexes__: List[IndexModel] = []
+    __collection_name__: str
+
+
+class AuthorizationCode(BaseDocument, AuthorizationCodeMixin):
     __indexes__ = [
         IndexModel([('expiration_time', ASCENDING)], expireAfterSeconds=0),
+        IndexModel([('user_id', ASCENDING)]),
     ]
     __collection_name__ = 'authorization_code'
 
@@ -57,10 +60,11 @@ class AuthorizationCode(BaseCollection, AuthorizationCodeMixin):
         return self.nonce
 
 
-class Token(BaseCollection, TokenMixin, AuthorizationCodeMixin):
+class Token(BaseDocument, TokenMixin, AuthorizationCodeMixin):
     __indexes__ = [
         IndexModel([('refresh_token', HASHED)]),
         IndexModel([('expiration_time', ASCENDING)], expireAfterSeconds=0),
+        IndexModel([('user_id', ASCENDING)]),
     ]
     __collection_name__ = 'token'
 
@@ -90,7 +94,7 @@ class Token(BaseCollection, TokenMixin, AuthorizationCodeMixin):
         return self.expires_in
 
     def get_expires_at(self):
-        return self.expiration_time
+        return int(self.expiration_time.replace(tzinfo=pytz.UTC).timestamp())
 
     def get_redirect_uri(self):
         return None
@@ -102,9 +106,10 @@ class Token(BaseCollection, TokenMixin, AuthorizationCodeMixin):
         return self.auth_time
 
 
-class Session(BaseCollection):
+class Session(BaseDocument):
     __indexes__ = [
         IndexModel([('expiration_time', ASCENDING)], expireAfterSeconds=0),
+        IndexModel([('user_id', ASCENDING)]),
     ]
     __collection_name__ = 'session'
 
@@ -116,10 +121,20 @@ class Session(BaseCollection):
     expiration_time: datetime = ...
 
 
-class Client(BaseCollection, ClientMixin):
+class AccessGroup(BaseSubDocument):
+    group: str
+    roles: List[str]
+
+
+class Client(BaseDocument, ClientMixin):
+    __indexes__ = [
+        IndexModel([('access_groups.group', ASCENDING)]),
+    ]
     __collection_name__ = 'client'
 
     id: str = Field(..., alias='_id')
+
+    notes: Optional[str] = Field(None, max_length=1024*1024)
 
     redirect_uri: List[str]
     allowed_scope: List[str]
@@ -167,12 +182,14 @@ class Client(BaseCollection, ClientMixin):
             for chk_grant_type in self.grant_type
         )
 
-    access_groups: List[str]
+    access_groups: List[AccessGroup]
 
 
-class ClientUserCache(BaseCollection):
+class ClientUserCache(BaseDocument):
     __indexes__ = [
         IndexModel([('client_id', ASCENDING), ('user_id', ASCENDING)]),
+        IndexModel([('user_id', ASCENDING)]),
+        IndexModel([('groups', ASCENDING)]),
     ]
     __collection_name__ = 'client_user_cache'
 
@@ -182,59 +199,65 @@ class ClientUserCache(BaseCollection):
     user_id: str
 
     groups: List[str]
+    roles: List[str]
 
     last_modified: int
 
 
-class UserGroup(BaseCollection):
+class UserGroup(BaseDocument):
     __indexes__ = [
         IndexModel([('member_groups', ASCENDING)]),
         IndexModel([('members', ASCENDING)]),
     ]
-    __collection_name__ = 'client_access'
+    __collection_name__ = 'user_group'
 
     id: str = Field(..., alias='_id')
 
     group_name: str
+    notes: Optional[str] = Field(None, max_length=1024 * 1024)
+
+    visible: bool
 
     member_groups: List[str] = []
     members: List[str] = []
 
 
-class User(BaseCollection):
+class User(BaseDocument):
+
+    class Config:
+        extra = Extra.allow
+
     __indexes__ = [
         IndexModel([('email', HASHED)]),
+        IndexModel([('registration_token', HASHED)]),
+        IndexModel([('email_verification_token', HASHED)]),
+        IndexModel([('password_reset_token', HASHED)]),
     ]
     __collection_name__ = 'user'
 
     id: str = Field(..., alias='_id')
+    notes: Optional[str] = Field(None, max_length=1024 * 1024)
 
     password: Optional[str] = None
+    password_reset_token: Optional[str] = None
 
-    is_new: bool = True
-    mail_verified: bool = False
+    active: bool = False
+
+    registration_token: Optional[str] = None
 
     email: str
+    email_verified: bool = False
+    email_verification_token: Optional[str] = None
 
     phone_number: Optional[str] = None
     phone_number_verified: bool = False
 
-    name: str
-    family_name: str
-    given_name: str
-    nickname: Optional[str]
+    # preferred_username: str
 
-    @property
-    def preferred_username(self) -> str:
-        return self.email
-
-    profile: Optional[str]
     picture: Optional[str]
-    website: Optional[str]
-
-    birthdate: Optional[str]
 
     locale: Optional[str]
-    updated_at: Optional[datetime]
+    zoneinfo: Optional[str]
+    updated_at: Optional[int]
 
     groups: List[str] = []

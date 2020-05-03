@@ -12,3 +12,4 @@ argon2_cffi
 python-multipart
 cryptography
 dateutils
+pwnedpasswords

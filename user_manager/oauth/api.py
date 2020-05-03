@@ -1,8 +1,9 @@
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Any, Dict, List, cast
+from typing import Optional, Any, Dict, List, cast, Tuple
 
+import gridfs
 from authlib.common.security import generate_token
 from authlib.common.urls import add_params_to_uri
 from authlib.oauth2 import OAuth2Request
@@ -11,14 +12,14 @@ from fastapi.params import Depends, Query, Body, Cookie, Header, Form
 from pydantic import BaseModel
 from pymongo.collection import Collection
 from starlette.requests import Request
-from starlette.responses import JSONResponse, FileResponse, Response
+from starlette.responses import JSONResponse, FileResponse, Response, StreamingResponse
 
 from user_manager.common.config import config
 from user_manager.common.models import User, Session
-from user_manager.common.mongo import user_collection, session_collection, token_collection
+from user_manager.common.mongo import user_collection, session_collection, token_collection, user_picture_bucket
 from user_manager.common.password_helper import verify_and_update
 from .cors import CORSHelper
-from .oauth2 import authorization, ErrorJSONResponse, ErrorRedirectResponse, RedirectResponse, UserWithGroups, \
+from .oauth2 import authorization, ErrorJSONResponse, ErrorRedirectResponse, RedirectResponse, UserWithRoles, \
     user_introspection, token_revocation, TypeHint, TypedRequest
 from .oauth2_key import supported_alg_sig, jwks, JSONWebKeySet
 
@@ -50,13 +51,17 @@ allow_all_post_cors = CORSHelper(
     allow_headers=('authorization',),
     allow_credentials=True,
 )
+allow_all_get_head_cors = CORSHelper(
+    allow_origins='*',
+    allow_methods=('GET', 'HEAD'),
+)
 
 
 async def oauth2_request(request: Request) -> TypedRequest:
     return cast(TypedRequest, OAuth2Request(request.method, str(request.url), await request.form(), request.headers))
 
 
-def add_session_state(response: RedirectResponse, user: UserWithGroups):
+def add_session_state(response: RedirectResponse, user: UserWithRoles):
     response.headers['location'] = add_params_to_uri(response.headers['location'], [('session_state', user.last_modified)])
 
 
@@ -121,8 +126,8 @@ async def enter_authorization(
 ):
     """Enter the authorization process. May redirect to login page or return directly."""
     user = validate_session(sid, session_collection, user_collection)
-    if user is not None:
-        user_with_groups = UserWithGroups.load_groups(user, _query_params.client_id)
+    if user is not None and user.active:
+        user_with_groups = UserWithRoles.load_groups(user, _query_params.client_id)
         resp = authorization.create_authorization_response(
             request=await oauth2_request(request),
             grant_user=user_with_groups,
@@ -171,17 +176,21 @@ async def authorize(
         auth_credentials: AuthCredentials = Body(...),
 ):
     """Perform authorization from given credentials and returns the result."""
-    user_data = user_collection.find_one({'email': auth_credentials.email})
-    if user_data is None:
+    potential_users = user_collection.find({'email': auth_credentials.email})
+    for potential_user in potential_users:
+        if potential_user.get('password') is not None:
+            password_valid, new_hash = verify_and_update(auth_credentials.password, potential_user['password'])
+            if password_valid:
+                user_data = potential_user
+                break
+    else:
         raise HTTPException(401)
+
     user = User.validate(user_data)
-    password_valid, new_hash = verify_and_update(auth_credentials.password, user.password)
-    if not password_valid:
-        raise HTTPException(401)
     if new_hash is not None:
         user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
         user.password = new_hash
-    user_group_data = UserWithGroups.load_groups(user, _query_params.client_id)
+    user_group_data = UserWithRoles.load_groups(user, _query_params.client_id)
     oauth_request = await oauth2_request(request)
     resp = authorization.create_authorization_response(
         request=oauth_request,
@@ -361,16 +370,16 @@ async def post_revoke_token(
     return response
 
 
-@router.options('/me')
-async def get_self_options(request: Request):
+@router.options('/userinfo')
+async def get_userinfo_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
-    '/me',
+    '/userinfo',
     response_model=Dict[str, Any],
 )
-async def get_self(
+async def get_userinfo(
         request: Request,
         session_state: Optional[str] = Cookie(None, alias=COOKIE_KEY_STATE),
 ):
@@ -388,6 +397,75 @@ async def get_self(
         )
 
     return response
+
+
+def _get_picture(
+        picture_id: str,
+        if_none_match: str = Header(None),
+        if_match: str = Header(None),
+) -> Tuple[gridfs.GridOut, dict]:
+    try:
+        stream = user_picture_bucket.open_download_stream(picture_id)
+    except gridfs.errors.NoFile:
+        raise HTTPException(404)
+    file_hash = stream.metadata['hash'].hex()
+    if if_none_match is not None and file_hash in [m.strip() for m in if_none_match.split(',')]:
+        stream.close()
+        raise HTTPException(304)
+    if if_match is not None and file_hash not in [m.strip() for m in if_match.split(',')]:
+        stream.close()
+        raise HTTPException(304)
+    return stream, {'ETag': file_hash}
+
+
+@router.options('/picture/{picture_id}')
+async def get_picture_options(request: Request):
+    return allow_all_get_head_cors.options(request)
+
+
+@router.head(
+    '/picture/{picture_id}',
+    tags=['User Manager'],
+)
+def get_picture_meta(
+        picture_id: str,
+        if_none_match: str = Header(None),
+        if_match: str = Header(None),
+):
+    """Get picture metadata."""
+    try:
+        stream, headers = _get_picture(picture_id, if_none_match, if_match)
+        stream.close()
+    except HTTPException as e:
+        return Response(status_code=e.status_code)
+    return Response(status_code=200, headers=headers)
+
+
+@router.get(
+    '/picture/{picture_id}',
+    tags=['User Manager'],
+)
+def get_picture(
+        picture_id: str,
+        if_none_match: str = Header(None),
+        if_match: str = Header(None),
+):
+    """Get picture data."""
+    try:
+        stream, headers = _get_picture(picture_id, if_none_match, if_match)
+    except HTTPException as e:
+        return Response(status_code=e.status_code)
+
+    def stream_iterator():
+        while True:
+            chunk = stream.readchunk()
+            if not chunk:
+                break
+            yield chunk
+
+    return StreamingResponse(
+        stream_iterator(), media_type=stream.metadata['content_type'], headers=headers
+    )
 
 
 @router.get(
@@ -477,7 +555,7 @@ class OpenIDConnectResponse(BaseModel):
     registration_endpoint: Optional[str]
     scopes_supported: List[str]
     response_types_supported: List[str] = [
-        'code', 'token', 'id_token token', 'code id_token', 'code token', 'code id_token token',
+        'code', 'token', 'id_token', 'token id_token', 'code id_token', 'code token', 'code token id_token',
     ]
     response_modes_supported: Optional[List[str]] = ['query', 'fragment']
     grant_types_supported: List[str] = [
@@ -525,9 +603,9 @@ async def get_openid_configuration(request: Request):
             authorization_endpoint=config.oauth2.base_url + '/authorize',
             token_endpoint=config.oauth2.base_url + '/token',
             revocation_endpoint=config.oauth2.base_url + '/token/revoke',
-            userinfo_endpoint=config.oauth2.base_url + '/me',
+            userinfo_endpoint=config.oauth2.base_url + '/userinfo',
             jwks_uri=config.oauth2.base_url + '/.well-known/jwks',
-            scopes_supported=['openid'] + list(config.oauth2.user.scopes.keys()),
+            scopes_supported=['openid', 'offline_access'] + list(config.oauth2.user.scopes.keys()),
             id_token_signing_alg_values_supported=supported_alg_sig,
             userinfo_signing_alg_values_supported=supported_alg_sig,
             check_session_iframe=config.oauth2.base_url + '/login-status-iframe.html',

@@ -1,0 +1,12 @@
+E-Mail Verification
+<html>
+  <body>
+    <p>Hello ${user.given_name},</p>
+    <p></p>
+    <p>click the following link to verify this e-mail address for ${config.manager.name}: <a href="${config.manager.frontend_base_url}/${verify_link}">Verify E-Mail Address</a></p>
+    <p>This link is valid until ${valid_until.strftime('%Y-%m-%d %H:%M')}.</p>
+    <p></p>
+    <p>Best,</p>
+    <p>Your Admins</p>
+  </body>
+</html>

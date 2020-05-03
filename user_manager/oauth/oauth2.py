@@ -25,52 +25,112 @@ from authlib.oidc.core.grants import (
     OpenIDImplicitGrant as _OpenIDImplicitGrant,
     OpenIDHybridGrant as _OpenIDHybridGrant,
 )
-from authlib.oidc.core.grants.util import is_openid_scope
+from authlib.oidc.core.grants.util import is_openid_scope, generate_id_token
+from fastapi import HTTPException
 from pydantic import BaseModel
 from starlette.responses import Response, JSONResponse
 
 from user_manager.common.config import config
-from user_manager.common.models import AuthorizationCode, Token, User, Client
+from user_manager.common.models import AuthorizationCode, Token, User, Client, UserGroup, ClientUserCache
 from user_manager.common.mongo import authorization_code_collection, user_collection, token_collection, \
-    client_collection, client_user_cache_collection
+    client_collection, client_user_cache_collection, user_group_collection
 from . import oauth2_key
 
 
-class UserWithGroups(BaseModel):
+def _resolve_groups(
+        group_ids: List[str]
+) -> Dict[str, List[str]]:
+    return {
+        group_data['_id']: [grp['_id'] for grp in group_data['sub_groups']]
+        for group_data in user_group_collection.aggregate([
+            {
+                '$match': {'_id': {'$in': group_ids}},
+            },
+            {
+                '$graphLookup': {
+                    'from': UserGroup.__collection_name__,
+                    'startWith': '$member_groups',
+                    'connectFromField': 'member_groups',
+                    'connectToField': '_id',
+                    'as': 'sub_groups'
+                }
+            },
+            {
+                '$project': {
+                    '_id': 1,
+                    'sub_groups._id': 1,
+                }
+            }
+        ])
+    }
+
+
+def _create_user_cache_for_user_client(user_data: User, client_id: str) -> Optional[dict]:
+    """Returns the cache entry or none if not authenticated."""
+    user_groups = _resolve_groups(user_data.groups)
+
+    all_user_groups = list({
+        grp for grps in user_groups.values() for grp in grps
+    } | set(user_groups.keys()))
+
+    client = client_collection.find_one({'_id': client_id}, {'_id': 0, 'access_groups': 1})
+    if client is None:
+        return None
+
+    common_groups = [
+        access_group for access_group in client['access_groups'] if access_group['group'] in all_user_groups
+    ]
+    client_user_groups = [access_group['group'] for access_group in common_groups]
+    client_user_roles = list(set(role for access_group in common_groups for role in access_group['roles']))
+    effective_groups = set(client_user_groups) | {
+        group for user_group in client_user_groups for group in user_groups.get(user_group, [])
+    }
+    if client_user_groups and client_user_roles:
+        cache_entry = ClientUserCache(
+            id=generate_token(30),
+            client_id=client_id,
+            user_id=user_data.id,
+            groups=list(effective_groups),
+            roles=client_user_roles,
+            last_modified=user_data.updated_at
+        ).dict(exclude_none=True, by_alias=True)
+        client_user_cache_collection.insert_one(cache_entry)
+        return cache_entry
+    return None
+
+
+class UserWithRoles(BaseModel):
     user: User
-    groups: List[str]
+    roles: List[str]
     last_modified: int
 
     @staticmethod
-    def load(user_id: str, client_id: str) -> Optional['UserWithGroups']:
-        group_data = client_user_cache_collection.find_one({
-            'client_id': client_id,
-            'user_id': user_id,
-        })
-        if group_data is None:
-            return None
+    def load(user_id: str, client_id: str) -> Optional['UserWithRoles']:
         user_data = user_collection.find_one({'_id': user_id})
         if user_data is None:
             return None
-        return UserWithGroups(
-            user=User.validate(user_data),
-            groups=group_data['groups'],
-            last_modified=group_data['last_modified'],
-        )
+        user = User.validate(user_data)
+        if not user.active:
+            raise HTTPException(401, "User inactive")
+        return UserWithRoles.load_groups(user, client_id)
 
     @staticmethod
-    def load_groups(user: User, client_id: str) -> Optional['UserWithGroups']:
+    def load_groups(user: User, client_id: str) -> Optional['UserWithRoles']:
+        if not user.active:
+            raise HTTPException(401, "User inactive")
         group_data = client_user_cache_collection.find_one({
             'client_id': client_id,
             'user_id': user.id,
         })
         if group_data is None:
+            group_data = _create_user_cache_for_user_client(user, client_id)
+        if group_data is None:
             return None
-        return UserWithGroups(user=user, groups=group_data['groups'], last_modified=group_data['last_modified'])
+        return UserWithRoles(user=user, roles=group_data['roles'], last_modified=group_data['last_modified'])
 
 
 class TypedRequest(OAuth2Request):
-    user: UserWithGroups
+    user: UserWithRoles
     credential: Union[AuthorizationCode, Token]
     client: Client
 
@@ -183,15 +243,17 @@ class JwtConfigMixin(object):
 
 
 class UserInfoMixin(object):
-    def generate_user_info(self, user: UserWithGroups, scope: str):
+    def generate_user_info(self, user: UserWithRoles, scope: str):
         scope_list = scope_to_list(scope)
         includes = set()
         for scope in scope_list:
             if scope not in ('openid', 'offline_access'):
-                includes.update(config.oauth2.user.scopes[scope])
+                includes.update(config.oauth2.user.scopes[scope].properties)
         user_data = user.user.dict(include=includes, by_alias=True, exclude_none=True)
         user_data['sub'] = user.user.id
-        user_data['groups'] = user.groups
+        user_data['roles'] = user.roles
+        if 'picture' in user_data:
+            user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
         return UserInfo(**user_data)
 
 
@@ -214,7 +276,7 @@ class AuthorizationCodeGrant(_AuthorizationCodeGrant):
         authorization_code_collection.delete_one({'_id': authorization_code.code})
 
     def authenticate_user(self, authorization_code: AuthorizationCode):
-        return UserWithGroups.load(authorization_code.user_id, authorization_code.client_id)
+        return UserWithRoles.load(authorization_code.user_id, authorization_code.client_id)
 
 
 class OpenIDCode(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDCode):
@@ -228,7 +290,7 @@ class OpenIDImplicitGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _Open
 class OpenIDHybridGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDHybridGrant):
     jwt_token_expiration = config.oauth2.token_expiration.implicit
 
-    def create_authorization_code(self, client: Client, grant_user: UserWithGroups, request: TypedRequest):
+    def create_authorization_code(self, client: Client, grant_user: UserWithRoles, request: TypedRequest):
         return save_authorization_code(generate_token(config.oauth2.authorization_code_length), request)
 
 
@@ -246,7 +308,7 @@ class RefreshTokenGrant(_RefreshTokenGrant):
         return auth_code
 
     def authenticate_user(self, credential: Token):
-        return UserWithGroups.load(credential.user_id, credential.client_id)
+        return UserWithRoles.load(credential.user_id, credential.client_id)
 
     def revoke_old_credential(self, credential: Token):
         # token_collection.update_one({'_id': credential.access_token}, {'revoked': True})
@@ -283,6 +345,18 @@ def token_generator(*_):
     return generate_token(config.oauth2.token_length)
 
 
+class AccessTokenGenerator(UserInfoMixin, JwtConfigMixin):
+    jwt_token_expiration = config.oauth2.token_expiration.authorization_code
+
+    def __call__(self, client: Client, grant_type: str, user: UserWithRoles, scope: str):
+        jwt_config = self.get_jwt_config()
+        jwt_config['aud'] = [client.get_client_id()]
+        jwt_config['auth_time'] = int(time.time())
+
+        user_info = {'sub': user.user.id, 'roles': user.roles}
+        return generate_id_token({}, user_info, code=generate_token(config.oauth2.access_token_length), **jwt_config)
+
+
 def token_expires_in(_, grant_type: str):
     return getattr(config.oauth2.token_expiration, grant_type)
 
@@ -298,7 +372,7 @@ class BearerToken(_BearerToken):
 authorization = AuthorizationServer(
     query_client,
     save_token,
-    BearerToken(token_generator, expires_generator=token_expires_in, refresh_token_generator=token_generator),
+    BearerToken(AccessTokenGenerator(), expires_generator=token_expires_in, refresh_token_generator=token_generator),
 )
 
 
@@ -355,7 +429,7 @@ class UserIntrospection(UserInfoMixin):
         try:
             assert isinstance(request, OAuth2Request)
             request.token = resource_protector.validate_request(None, request)
-            request.user = UserWithGroups.load(request.token.user_id, request.token.client_id)
+            request.user = UserWithRoles.load(request.token.user_id, request.token.client_id)
             user_info = self.generate_user_info(request.user, request.token.scope)
             return JSONResponse(user_info)
         except OAuth2Error as error:

@@ -1,0 +1,8 @@
+Registration
+Hello${' ' + user.given_name if 'given_name' in user else ''},
+
+click the following link to finish registration for ${config.manager.name}: ${config.manager.frontend_base_url}/${registration_link}
+This link is valid until ${valid_until.strftime('%Y-%m-%d %H:%M')}.
+
+Best,
+Your Admins

@@ -1,0 +1,8 @@
+E-Mail Verification
+Hello ${user.given_name},
+
+click the following link to verify this e-mail address for ${config.manager.name}: ${config.manager.frontend_base_url}/${verify_link}
+This link is valid until ${valid_until.strftime('%Y-%m-%d %H:%M')}.
+
+Best,
+Your Admins

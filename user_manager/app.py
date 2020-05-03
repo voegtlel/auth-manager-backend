@@ -1,12 +1,7 @@
-from fastapi import FastAPI
-from starlette.middleware.sessions import SessionMiddleware
+from user_manager.manager.app import app as manager_app
+from user_manager.oauth.app import app
 
-from user_manager.common.config import config
-from user_manager.oauth.api import router as oauth_router
-from user_manager.manager.api import router as manager_router
+app.mount('/api/v1/manager', manager_app)
 
-app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key=config.manager.secret_key)
-
-app.include_router(oauth_router)
-app.include_router(manager_router, prefix='/manager')
+for route in app.routes:
+    print(f"Route {getattr(route, 'methods', None)} {getattr(route, 'path', None)}: {getattr(route, 'name', None)}")

@@ -58,18 +58,30 @@ class OAuthFieldType(Enum):
     datetime = datetime
 
 
-class UserPropertyType(Enum):
+class UserPropertyType(str, Enum):
     str = 'str'
-    password = 'password'
+    multistr = 'multistr'
     datetime = 'datetime'
     bool = 'bool'
-    picture = 'picture'
     enum = 'enum'
+    password = 'password'
+    email = 'email'
+    picture = 'picture'
+    groups = 'groups'
 
 
-class CanEditType(Enum):
+class AccessType(str, Enum):
+    everybody = 'everybody'
     self = 'self'
     admin = 'admin'
+    nobody = 'nobody'
+
+    def has_access(self, is_self: bool = False, is_admin: bool = False) -> bool:
+        return (
+            self == AccessType.everybody or
+            (self == AccessType.self and (is_self or is_admin)) or
+            (self == AccessType.admin and is_admin)
+        )
 
 
 class EnumValue(BaseModel):
@@ -80,16 +92,25 @@ class EnumValue(BaseModel):
 class UserProperty(BaseModel):
     type: UserPropertyType = ...
     format: Optional[str]
-    can_edit: Optional[CanEditType]
+    format_help: Optional[str]
+    can_edit: AccessType = AccessType.nobody
+    can_read: AccessType = AccessType.everybody
+    default: Optional[Any]
+    visible: bool = True
     title: Optional[str]
     values: Optional[List[EnumValue]]
-    pwned_password_check: bool = True
     template: Optional[str]
+    required: Optional[bool]
+
+
+class Scope(BaseModel):
+    title: str
+    properties: List[str]
 
 
 class UserScopes(BaseModel):
     properties: Dict[str, UserProperty]
-    scopes: Dict[str, List[str]]
+    scopes: Dict[str, Scope]
     password: Dict[str, Any]
 
 
@@ -129,7 +150,7 @@ class OAuth2TokenExpiration(BaseModel):
 
 class OAuth2ClientConfig(BaseModel):
     client_id: str
-    client_secret: str
+    client_secret: Optional[str]
     request_token_url: Optional[str]
     request_token_params: Optional[str]
     access_token_url: Optional[str]
@@ -142,6 +163,19 @@ class OAuth2ClientConfig(BaseModel):
     server_metadata_url: Optional[str]
 
 
+class MailConfig(BaseModel):
+    host: str = ...
+    port: Optional[int]
+    sender: str = ...
+
+    ssl: bool = False
+    starttls: bool = False
+    keyfile: Optional[str]
+    certfile: Optional[str]
+    user: Optional[str]
+    password: Optional[str]
+
+
 class OAuth2Config(BaseModel):
     base_url: str
 
@@ -151,16 +185,30 @@ class OAuth2Config(BaseModel):
     token_expiration: OAuth2TokenExpiration = OAuth2TokenExpiration()
 
     token_length: int = ...
+    access_token_length: int = ...
     authorization_code_length: int = ...
 
     user: UserScopes = ...
 
 
+class ManagerTokenValid(BaseModel):
+    registration: int = 24 * 60 * 60
+    email_set: int = 24 * 60 * 60
+    password_reset: int = 24 * 60 * 60
+
+
 class ManagerConfig(BaseModel):
     secret_key: str = ...
+    backend_cors_origin: str = ...
     backend_base_url: str = ...
     frontend_base_url: str = ...
+    name: str = ...
     oauth2: OAuth2ClientConfig
+    mail: MailConfig = ...
+    view: List[str] = ...
+    registration: List[str] = ...
+    token_valid: ManagerTokenValid = ...
+    list: List[str] = ...
 
 
 class Config(BaseModel):

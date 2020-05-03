@@ -1,16 +1,15 @@
 mongo:
-  uri: mongodb://localhost:27017/db
+  uri: mongodb://127.0.0.1:27017/db
 
 oauth2:
-  base_url: http://localhost:8000
+  base_url: "http://127.0.0.1:8000"
   keys:
     - key_file: key.private
       algorithm: RS256
       use: sig
       publish: true
       id: 'RS256'
-  #issuer: jdav-freiburg.de
-  issuer: "http://localhost:8000"
+  issuer: "http://127.0.0.1:8000"
 
   token_length: 48
   token_expiration:
@@ -20,104 +19,285 @@ oauth2:
     password: 86400
     client_credentials: 86400
     session: 31536000
-
+  access_token_length: 32
   authorization_code_length: 48
 
   user:
     properties:
-      email:
+      sub:
         type: str
+        title: "User ID"
+      active:
+        type: bool
+        title: "Active"
+        default: false
+        can_edit: admin
+      email:
+        type: email
+        title: "E-Mail"
+        required: true
         format: '^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        format_help: "ab@c.de"
         can_edit: self
       email_verified:
         type: bool
+        title: "E-Mail Verified"
         can_edit: admin
       phone_number:
         type: str
+        title: "Phone"
+        required: true
         format: '^((\+[0-9]{2}[- /\.]?([1-9][0-9]{2,5}))|(0[0-9]{3,4}))[-\s\./0-9]*[0-9]$'
+        format_help: "+49 1234 56789"
         can_edit: self
       phone_number_verified:
         type: bool
+        title: "Phone Verified"
         can_edit: admin
       name:
         type: str
-        template: "{given_name.lower()}.{family_name.lower()}"
+        title: "Name"
+        visible: false
+        template: "{given_name} {family_name}"
       family_name:
         type: str
-        title: Family Name
+        title: "Family Name"
+        required: true
         format: '^[\p{L} -]+$'
+        format_help: "printable characters"
         can_edit: self
       given_name:
         type: str
-        title: Given Name
+        title: "Given Name"
+        required: true
         format: '^[\p{L} -]+$'
+        format_help: "printable characters"
         can_edit: self
       # middle_name
       # nickname
       preferred_username:
         type: str
-        template: "{given_name.lower()}.{family_name.lower()}"
+        title: "Preferred Username"
+        visible: false
+        template: "{given_name.replace(' ', '.').lower()}.{family_name.lower()}"
       profile:
         type: str
+        title: "Profile URL"
+        visible: false
       picture:
         type: picture
-        title: Picture
+        title: "Picture"
         can_edit: self
       # website
-      # gender
-      # birthdate
-      # zoneinfo
+      gender:
+        type: enum
+        title: "Gender"
+        can_edit: self
+        required: true
+        values:
+          - value: female
+            title: "Female"
+          - value: male
+            title: "Male"
+          - value: non-binary
+            title: "Non-Binary"
+          - value: undefined
+            title: "No Answer"
+      birthdate:
+        type: str
+        title: "Date of birth"
+        can_edit: self
+        can_read: self
+        required: true
+        format: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+        format_help: "1900-01-01 (year-month-day)"
+      zoneinfo:
+        type: enum
+        title: "Zone Info"
+        default: Europe/Berlin
+        values:
+          - value: Europe/Berlin
+            title: Europe/Berlin
+        can_edit: self
+        can_read: self
+        visible: false
       locale:
         type: enum
-        title: Language
+        title: "Preferred Language"
         can_edit: self
+        can_read: self
         values:
           - value: de_de
             title: Deutsch
           - value: en_us
             title: English
+      address.street_address:
+        type: str
+        title: "Street Address"
+        required: true
+        can_edit: self
+        can_read: self
+      address.locality:
+        type: str
+        title: 'City'
+        required: true
+        can_edit: self
+        can_read: self
+      address.region:
+        type: str
+        title: 'State/Province'
+        can_edit: self
+        can_read: self
+      address.postal_code:
+        type: str
+        title: "Postal Code"
+        required: true
+        can_edit: self
+        can_read: self
+      address.country:
+        type: enum
+        title: "Country"
+        can_edit: self
+        can_read: self
+        default: germany
+        required: true
+        values:
+          - value: germany
+            title: Germany
+          - value: switzerland
+            title: Switzerland
+          - value: france
+            title: France
       updated_at:
         type: datetime
+        title: "Updated At"
+        visible: false
+        can_read: self
       password:
         type: password
-        title: Password
+        title: "Password"
+        required: true
         can_edit: self
-        pwned_password_check: true
+        can_read: nobody
+      groups:
+        type: groups
+        title: "Groups"
+        default: ['users']
+        can_edit: admin
+        can_read: self
+      notes:
+        type: multistr
+        title: "Admin Notes"
+        can_edit: admin
+        can_read: admin
       card_id:
         type: str
+        title: "Card ID"
         can_edit: self
+        can_read: admin
+        visible: false
         format: '^[0-9a-fA-F]*$'
     scopes:
       email:
-        - email
-        - email_verified
+        title: "E-Mail"
+        properties:
+          - email
+          - email_verified
       phone:
-        - phone_number
-        - phone_number_verified
+        title: "Phone"
+        properties:
+          - phone_number
+          - phone_number_verified
       profile:
-        - name
-        - family_name
-        - given_name
-        # middle_name
-        # nickname
-        - preferred_username
-        - profile
-        - picture
-        # website
-        # gender
-        # birthdate
-        # zoneinfo
-        - locale
-        - updated_at
+        title: "Profile"
+        properties:
+          - name
+          - family_name
+          - given_name
+          # - middle_name
+          # - nickname
+          - preferred_username
+          - profile
+          - picture
+          # - website
+          # - gender
+          # - birthdate
+          - zoneinfo
+          # - 'address.street_address'
+          # - 'address.locality'
+          # - 'address.region'
+          # - 'address.postal_code'
+          # - 'address.country'
     password:
       schemes: ['argon2', 'bcrypt', 'pbkdf2_sha256']
+      pwned_password_check: true
 
 manager:
-  backend_base_url: http://localhost:8000/manager
-  frontend_base_url: http://localhost:4200
+  backend_cors_origin: http://127.0.0.1:4200
+  backend_base_url: http://127.0.0.1:8000/manager
+  frontend_base_url: http://127.0.0.1:4200
   secret_key: 'blablabla'
+  name: "User Manager"
+
+  token_valid:
+    registration: 86400
+    email_set: 86400
+    password_reset: 86400
 
   oauth2:
-    server_metadata_url: 'http://localhost:8000/.well-known/openid-configuration'
+    server_metadata_url: 'http://127.0.0.1:8000/.well-known/openid-configuration'
     client_id: 'manager'
-    client_secret: 'client1secret'
+  mail:
+    host: localhost
+    sender: "admin@localhost"
+    #port: 25
+    #ssl: false
+    #starttls: false
+    #keyfile: null
+    #certfile: null
+    #user: ""
+    #password: ""
+
+  list:
+    - email
+    - given_name
+    - family_name
+    - phone_number
+    - active
+
+  view:
+    - picture
+    - email
+    - password
+    - active
+    - email_verified
+    - phone_number_verified
+    - given_name
+    - family_name
+    - phone_number
+    - locale
+    - birthdate
+    - gender
+    - address.street_address
+    - address.locality
+    - address.region
+    - address.postal_code
+    - address.country
+    - notes
+    - groups
+
+  registration:
+    - picture
+    - email
+    - password
+    - given_name
+    - family_name
+    - phone_number
+    - locale
+    - birthdate
+    - gender
+    - address.street_address
+    - address.postal_code
+    - address.locality
+    - address.region
+    - address.country

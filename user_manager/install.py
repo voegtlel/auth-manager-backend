@@ -1,10 +1,9 @@
 import time
-from uuid import uuid4
 
 from user_manager.common import mongo
 from user_manager.common.config import config
-from user_manager.common.models import User, UserGroup, Client, ClientUserCache
-from user_manager.common.password_helper import create_password
+from user_manager.common.models import User, UserGroup, Client, AccessGroup
+from user_manager.manager.api.user_helpers import _create_token
 
 if __name__ == '__main__':
     admin_id = "admin"
@@ -18,6 +17,8 @@ if __name__ == '__main__':
     mongo.user_collection.drop()
     mongo.client_user_cache_collection.drop()
 
+    now = int(time.time())
+
     mongo.client_collection.insert_one(Client(
         id=config.manager.oauth2.client_id,
         token_endpoint_auth_method=['none'],
@@ -25,28 +26,29 @@ if __name__ == '__main__':
         allowed_scope=['openid', 'profile', 'email', 'offline_access'],
         response_type=['token', 'code'],
         grant_type=['authorization_code', 'refresh_token'],
-        access_groups=['admin'],
+        access_groups=[AccessGroup(group='admin', roles=['admin']), AccessGroup(group='user', roles=['edit_self'])],
+    ).dict(exclude_none=True, by_alias=True))
+    mongo.user_group_collection.insert_one(UserGroup(
+        id='users',
+        visible=True,
+        group_name="All Users",
+        members=[admin_id],
     ).dict(exclude_none=True, by_alias=True))
     mongo.user_group_collection.insert_one(UserGroup(
         id='admin',
+        visible=True,
         group_name="Admins",
         members=[admin_id],
     ).dict(exclude_none=True, by_alias=True))
+    registration_token = _create_token(admin_id, now + config.manager.token_valid.registration)
     mongo.user_collection.insert_one(User(
         id=admin_id,
         email="admin@localhost",
-        password=create_password('blablabla'),
-        is_new=False,
-        mail_verified=True,
-        name="Admin",
-        family_name="Admin",
-        given_name="Admin",
-        groups=['admin'],
+        active=False,
+        email_verified=True,
+        groups=['users', 'admin'],
+        updated_at=now,
+        registration_token=registration_token,
     ).dict(exclude_none=True, by_alias=True))
-    mongo.client_user_cache_collection.insert_one(ClientUserCache(
-        id=uuid4().hex,
-        client_id=config.manager.oauth2.client_id,
-        user_id=admin_id,
-        groups=['admin'],
-        last_modified=int(time.time()),
-    ).dict(exclude_none=True, by_alias=True))
+    print("Use the following link to register the administrator:")
+    print(f"{config.manager.frontend_base_url}/register/{registration_token}")
