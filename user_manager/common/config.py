@@ -29,15 +29,27 @@ def config_to_underscore(cfg):
     return cfg
 
 
-def _assign_key(cfg: Dict[str, Union[dict, Any]], key: str, value: Any, self_path: str):
+def _assign_key(cfg: Union[list, Dict[str, Any]], key: str, value: Any, self_path: str):
     found_key = None
     found_key_underscore = None
     first_part = key.split('_', 1)[0]
-    for cfg_key in cfg.keys():
-        if cfg_key.startswith(first_part):
-            if key.startswith(cfg_key):
-                found_key = cfg_key
-                found_key_underscore = cfg_key
+    if isinstance(cfg, dict):
+        for cfg_key in cfg.keys():
+            if cfg_key.startswith(first_part):
+                if key.startswith(cfg_key):
+                    found_key = cfg_key
+                    found_key_underscore = cfg_key
+    elif isinstance(cfg, list):
+        try:
+            idx = int(first_part)
+        except ValueError:
+            pass
+        else:
+            if 0 <= idx < len(cfg):
+                found_key = idx
+                found_key_underscore = first_part
+    else:
+        raise ValueError("Invalid cfg")
     if found_key is None:
         raise ValueError("Cannot find {} in {}".format(key, self_path))
     if found_key_underscore == key:
@@ -220,7 +232,7 @@ class Config(BaseModel):
     def load(config_file: str = 'config.yaml', env_prefix: str = 'api_config_') -> 'Config':
         with open(config_file, 'r') as f:
             config = yaml.load(f, Loader=yaml.SafeLoader)
-        config = config_to_underscore(config)
+        # config = config_to_underscore(config)
         for env_key, env_val in os.environ.items():
             lower_key = env_key.lower()
             if lower_key.startswith(env_prefix):
