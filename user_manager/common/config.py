@@ -229,7 +229,7 @@ class Config(BaseModel):
     manager: ManagerConfig
 
     @staticmethod
-    def load(config_file: str = 'config.yaml', env_prefix: str = 'api_config_') -> 'Config':
+    def load(config_file: str, env_prefix: str = 'api_config_') -> 'Config':
         with open(config_file, 'r') as f:
             config = yaml.load(f, Loader=yaml.SafeLoader)
         # config = config_to_underscore(config)
@@ -244,4 +244,4 @@ class Config(BaseModel):
         return Config.validate(config)
 
 
-config = Config.load()
+config = Config.load(os.environ.get('API_CONFIG_FILE', os.path.join(os.path.dirname(__file__), '..', 'config.yaml')))
