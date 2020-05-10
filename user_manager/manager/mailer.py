@@ -3,6 +3,7 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import aiosmtplib
 from typing import Tuple
 
 from mako.lookup import TemplateLookup
@@ -12,7 +13,10 @@ from user_manager.common.config import config
 
 class Mailer:
     def __init__(self):
-        self.template_lookup = TemplateLookup(directories=[os.path.join(os.path.dirname(__file__), 'mail_templates')])
+        self.template_lookup = TemplateLookup(
+            directories=[os.path.join(os.path.dirname(__file__), 'mail_templates')],
+            strict_undefined=True,
+        )
 
     def connect(self) -> smtplib.SMTP:
         if config.manager.mail.ssl:
@@ -47,6 +51,27 @@ class Mailer:
             raise
         return mailer
 
+    def async_mailer(self) -> aiosmtplib.SMTP:
+        if config.manager.mail.ssl:
+            port = 465
+        elif config.manager.mail.starttls:
+            port = 587
+        else:
+            port = 25
+        if config.manager.mail.port is not None:
+            port = config.manager.mail.port
+
+        return aiosmtplib.SMTP(
+            config.manager.mail.host,
+            port,
+            username=config.manager.mail.user,
+            password=config.manager.mail.password,
+            use_tls=config.manager.mail.ssl,
+            start_tls=config.manager.mail.starttls,
+            client_cert=config.manager.mail.certfile,
+            client_key=config.manager.mail.keyfile,
+        )
+
     def _render_template(self, language: str, name: str, **kwargs) -> Tuple[str, str]:
         if language != 'en_us' and not self.template_lookup.has_template(f'{language}/{name}'):
             language = 'en_us'
@@ -70,6 +95,19 @@ class Mailer:
 
         with self.connect() as connected_mailer:
             connected_mailer.sendmail(config.manager.mail.sender, [to], message.as_bytes())
+
+    async def async_send_mail(self, language: str, name: str, to: str, context: dict):
+        html_title, html_data = self._render_template(language, name + '.html', **context)
+        txt_title, txt_data = self._render_template(language, name + '.txt', **context)
+        assert txt_title == html_title
+
+        message = MIMEMultipart('alternative')
+        message['Subject'] = txt_title
+        message.attach(MIMEText(html_data, 'html'))
+        message.attach(MIMEText(txt_data, 'plain'))
+
+        async with self.async_mailer() as connected_mailer:
+            await connected_mailer.sendmail(config.manager.mail.sender, [to], message.as_bytes())
 
 
 mailer = Mailer()

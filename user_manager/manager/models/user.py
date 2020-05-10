@@ -33,5 +33,9 @@ class UsersListViewData(BaseModel):
     users: List[UserListViewData]
 
 
+class PasswordReset(BaseModel):
+    email: str
+
+
 class PasswordInWrite(BaseModel):
-    new_password: str
+    password: str

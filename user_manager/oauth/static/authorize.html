@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html style="height: 100%">
 <head>
     <meta charset="utf-8">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
@@ -14,13 +14,24 @@
             integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6"
             crossorigin="anonymous"></script>
     <script language="javascript" type="text/javascript">
-      function handleError(xhr) {
-        let obj = $.parseJSON(xhr.responseText);
-        console.log(obj);
-      }
-
-      function handleAuthError(xhr) {
-        $('error').text = 'Invalid credentials'
+      function handleError(xhr, target) {
+        let errorText = xhr.statusText;
+        try {
+          //let result = $.parseJSON(xhr.responseText);
+          let result = xhr.responseJSON;
+          console.error(result);
+          if (result.redirect_url) {
+            window.location.replace(result.redirect_url);
+            return;
+          }
+          if (result.detail) {
+            errorText = result.detail;
+          }
+        } catch(e) {
+          console.error(e, xhr);
+        }
+        $(target).text(errorText);
+        $(target).show();
       }
 
       function submitLogin(evt) {
@@ -29,6 +40,10 @@
             password: $('#inputPassword').val(),
             remember: $('#inputRemember').is(':checked'),
         };
+        $('#loginBtn').prop('disabled', true);
+        $('#loginBtnLoading').css('display', 'inline-block');
+        $('#inputEmail').prop('disabled', true);
+        $('#inputPassword').prop('disabled', true);
         evt.preventDefault();
         const query_params = window.location.href.slice(window.location.href.indexOf('?'))
         console.log("Submit", query_params, body);
@@ -41,43 +56,89 @@
 
         })
           .done(function(result) {
+            $('#loginBtnLoading').css('display', 'none');
+            $('#loginBtn').prop('disabled', false);
+            $('#inputEmail').prop('disabled', false);
+            $('#inputPassword').prop('disabled', false);
             window.location.replace(result.redirect_url);
           })
           .fail(function(xhr) {
-            console.log(xhr);
-            if (xhr.status == 400 || xhr.status == 403) {
-              let obj = $.parseJSON(xhr.responseText);
-              console.log(obj);
-            } else if (xhr.status == 401) {
-              try {
-                let result = $.parseJSON(xhr.responseText);
-                if (result.redirect_url) {
-                  window.location.replace(result.redirect_url);
-                  return;
-                }
-              } catch(e) {
-              }
-              $('#error').text('Invalid email or password');
-            }
+            $('#loginBtnLoading').css('display', 'none');
+            $('#loginBtn').prop('disabled', false);
+            $('#inputEmail').prop('disabled', false);
+            $('#inputPassword').prop('disabled', false);
+            handleError(xhr, '#loginError');
           });
+      }
+
+      function submitResetPassword(evt) {
+        const body = {
+            email: $('#inputResetEmail').val(),
+        };
+        evt.preventDefault();
+        console.log("Submit", body);
+        $('#resetBtnLoading').css('display', 'inline-block');
+        $('#resetBtn').prop('disabled', true);
+        $('#inputResetEmail').prop('disabled', true);
+        $.ajax({
+          url: '/api/v1/manager/reset-password',
+          dataType: 'json',
+          data: JSON.stringify(body),
+          method: 'POST',
+          contentType: 'application/json',
+
+        })
+          .done(function(result) {
+            $('#loginForm').css('display', 'none');
+            $('#forgotPasswordForm').css('display', 'none');
+            $('#resetDone').css('display', 'block');
+            $('#resetBtn').prop('disabled', false);
+            $('#resetBtnLoading').css('display', 'none');
+            $('#inputResetEmail').prop('disabled', false);
+          })
+          .fail(function(xhr) {
+            $('#resetBtn').prop('disabled', false);
+            $('#resetBtnLoading').css('display', 'none');
+            $('#inputResetEmail').prop('disabled', false);
+            handleError(xhr, '#resetError');
+          });
+      }
+
+      function showForgotPassword(evt) {
+        console.log("showForgotPassword", evt);
+        evt.preventDefault();
+        $('#loginForm').css('display', 'none');
+        $('#resetDone').css('display', 'none');
+        $('#forgotPasswordForm').css('display', 'block');
+      }
+
+      function showLogin(evt) {
+        evt.preventDefault();
+        $('#forgotPasswordForm').css('display', 'none');
+        $('#resetDone').css('display', 'none');
+        $('#loginForm').css('display', 'block');
       }
 
       $(document).ready(function() {
         console.log("ready");
         $('#loginForm').submit(submitLogin);
+        $('#forgotPasswordForm').submit(submitResetPassword);
+        $('#gotoForgotPasswordBtn').click(showForgotPassword);
+        $('#gotoLoginBtn').click(showLogin);
+        $('#gotoLoginBtn2').click(showLogin);
       });
-
 
     </script>
     <style>
-        html, body {
-          height: 100%;
+        body {
+          min-height: 100%;
         }
 
         body {
           display: -ms-flexbox;
           display: -webkit-box;
           display: flex;
+          flex-direction: column;
           -ms-flex-align: center;
           -ms-flex-pack: center;
           -webkit-box-align: center;
@@ -89,58 +150,82 @@
           background-color: #f5f5f5;
         }
 
-        .form-signin {
+        form, .info {
           width: 100%;
           max-width: 330px;
           padding: 15px;
           margin: 0 auto;
         }
-        .form-signin .checkbox {
+        form .checkbox {
           font-weight: 400;
         }
-        .form-signin .form-control {
+        form .form-control {
           position: relative;
           box-sizing: border-box;
           height: auto;
           padding: 10px;
           font-size: 16px;
         }
-        .form-signin .form-control:focus {
+        form .form-control:focus {
           z-index: 2;
         }
-        .form-signin input[type="email"] {
+        form input[type="email"]#inputEmail {
           margin-bottom: -1px;
           border-bottom-right-radius: 0;
           border-bottom-left-radius: 0;
         }
-        .form-signin input[type="password"] {
+        form input[type="password"] {
           margin-bottom: 10px;
           border-top-left-radius: 0;
           border-top-right-radius: 0;
         }
-        .invalid-feedback {
+
+        form input[type="email"]#inputResetEmail {
+          margin-bottom: 10px;
+        }
+
+        .invalid-feedback, .alert {
           display: block;
+        }
+        .alert {
+          margin-bottom: 10px;
+        }
+
+        button .spinner-border-sm {
+          margin-left: 1ex;
+          margin-bottom: 5px;
         }
     </style>
 </head>
 <body class="text-center">
-
-<form class="form-signin" id="loginForm">
+<form id="resetDone" style="display:none">
+    <div class="alert alert-success">
+        Check your e-mail to reset your password.
+    </div>
+    <button class="btn btn-link" type="button" id="gotoLoginBtn2">Back to Login</button>
+</form>
+<form id="loginForm">
     <h1 class="h3 mb-3 font-weight-normal">Sign in</h1>
     <label for="inputEmail" class="sr-only">Email address</label>
     <input type="email" id="inputEmail" class="form-control" placeholder="Email address" required="" autofocus="">
     <label for="inputPassword" class="sr-only">Password</label>
     <input type="password" id="inputPassword" class="form-control" placeholder="Password" required="">
-    <div class="mb-3">
-        <div class="invalid-feedback" id="error"></div>
-    </div>
     <div class="checkbox mb-3">
         <label>
             <input id="inputRemember" type="checkbox" value="true"> Remember me
         </label>
     </div>
-    <button class="btn btn-lg btn-primary btn-block" type="submit">Sign in</button>
+    <div class="alert alert-danger" style="display:none" id="loginError"></div>
+    <button class="btn btn-lg btn-primary btn-block" type="submit" id="loginBtn">Sign in <span class="spinner-border spinner-border-sm" style="display: none" id="loginBtnLoading" role="status" aria-hidden="true"></span></button>
+    <button class="btn btn-link" type="button" id="gotoForgotPasswordBtn">Forgot Password?</button>
 </form>
-
+<form id="forgotPasswordForm" style="display:none">
+    <h1 class="h3 mb-3 font-weight-normal">Reset Password</h1>
+    <label for="inputResetEmail" class="sr-only">Email address</label>
+    <input type="email" id="inputResetEmail" class="form-control" placeholder="Email address" required="" autofocus="">
+    <div class="alert alert-danger" style="display:none" id="resetError"></div>
+    <button class="btn btn-lg btn-primary btn-block" type="submit" id="resetBtn">Reset Password <span class="spinner-border spinner-border-sm" style="display: none" id="resetBtnLoading" role="status" aria-hidden="true"></span></button>
+    <button class="btn btn-link" type="button" id="gotoLoginBtn">Back to Login</button>
+</form>
 </body>
 </html>

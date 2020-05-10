@@ -1,24 +1,85 @@
 import time
 from base64 import b64encode, b64decode
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 
 from authlib.common.security import generate_token
 from fastapi import HTTPException
-from pydantic.datetime_parse import parse_datetime
+from pydantic.datetime_parse import parse_datetime, parse_date
 from pyisemail import is_email
 from pytz import UTC, timezone, UnknownTimeZoneError
 
 from user_manager.common.config import config, AccessType, UserPropertyType
-from user_manager.common.models import UserGroup, User
-from user_manager.common.mongo import user_group_collection, client_user_cache_collection, \
-    user_collection, token_collection, session_collection, authorization_code_collection
+from user_manager.common.models import User
+from user_manager.common.mongo import async_user_collection, \
+    async_client_user_cache_collection, async_authorization_code_collection, async_session_collection, \
+    async_token_collection, async_user_group_collection
 from user_manager.common.password_helper import verify_and_update, create_password, PasswordLeakedException
-from user_manager.manager.helper import get_regex
+from user_manager.manager.helper import get_regex, DotDict
 from user_manager.manager.mailer import mailer
 
 
-def _create_token(data: str, valid_until: int):
+def _get_tz(zoneinfo: str = None) -> datetime.tzinfo:
+    if zoneinfo is None:
+        zoneinfo = config.oauth2.user.properties['zoneinfo'].default
+    try:
+        return timezone(zoneinfo)
+    except UnknownTimeZoneError:
+        return UTC
+
+
+async def async_send_mail_register(
+        user_data: DotDict, token_valid_until: int, locale: str = None, tz: datetime.tzinfo = None
+):
+    if tz is None:
+        tz = _get_tz(user_data.get('zoneinfo'))
+    if locale is None:
+        locale = user_data.get('locale', 'en_us'),
+    await mailer.async_send_mail(
+        locale,
+        'register',
+        user_data['email'],
+        {
+            'registration_link': f"register/{user_data['registration_token']}",
+            'valid_until': datetime.fromtimestamp(token_valid_until, tz),
+            'user': user_data,
+        },
+    )
+
+
+async def async_send_mail_verify(
+        locale: Optional[str], mail: str, user_data: DotDict, token_valid_until: int, tz: datetime.tzinfo
+):
+    if locale is None:
+        locale = user_data.get('locale', 'en_us'),
+    await mailer.async_send_mail(
+        locale,
+        'verify_mail',
+        mail,
+        {
+            'verify_link': f"verify-email/{user_data['email_verification_token']}",
+            'valid_until': datetime.fromtimestamp(token_valid_until, tz),
+            'user': user_data,
+        },
+    )
+
+
+async def async_send_mail_reset_password(user_data: DotDict, token_valid_until: int, tz: datetime.tzinfo = None):
+    if tz is None:
+        tz = _get_tz(user_data.get('zoneinfo'))
+    await mailer.async_send_mail(
+        user_data.get('locale', 'en_us'),
+        'password_reset',
+        user_data['email'],
+        {
+            'password_reset_link': f"reset-password/{user_data['password_reset_token']}",
+            'valid_until': datetime.fromtimestamp(token_valid_until, tz),
+            'user': user_data,
+        },
+    )
+
+
+def create_token(data: str, valid_until: int):
     return (
             b64encode(data.encode()).decode('utf-8').replace('/', '_').replace('=', '') +
             '-' + generate_token(48) + '-' + str(valid_until)
@@ -46,53 +107,33 @@ def check_token(token: str) -> str:
     return data
 
 
-def _reset_password(
-        user_data: Dict[str, Any],
-):
-    token_valid_until = int(time.time() + config.manager.token_valid.password_reset)
-    user_data['password_reset_token'] = _create_token(user_data['_id'], token_valid_until)
-
-    mailer.send_mail(
-        user_data.get('locale', user_data.get('locale', 'en_us')),
-        'password_reset',
-        user_data['email'],
-        {
-            'password_reset_link': f"password_reset/{user_data['password_reset_token']}",
-            'valid_until': datetime.fromtimestamp(token_valid_until, UTC)
-        },
-    )
+async def update_resend_registration(user_data: DotDict):
+    token_valid_until = int(time.time() + config.manager.token_valid.registration)
+    user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
+    await async_user_collection.update_one({'_id': user_data['_id']}, {
+        '$set': {
+            'registration_token': user_data['registration_token'],
+            'updated_at': int(time.time()),
+        }
+    })
+    await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
+    await async_send_mail_register(user_data, token_valid_until)
 
 
-def _resolve_groups(
-        group_ids: List[str]
-) -> Dict[str, List[str]]:
-    return {
-        group_data['_id']: [grp['_id'] for grp in group_data['sub_groups']]
-        for group_data in user_group_collection.aggregate([
-            {
-                '$match': {'_id': {'$in': group_ids}},
-            },
-            {
-                '$graphLookup': {
-                    'from': UserGroup.__collection_name__,
-                    'startWith': '$member_groups',
-                    'connectFromField': 'member_groups',
-                    'connectToField': '_id',
-                    'as': 'sub_groups'
-                }
-            },
-            {
-                '$project': {
-                    '_id': 1,
-                    'sub_groups._id': 1,
-                }
-            }
-        ])
-    }
+def _validate_property_write(key: str, is_self: bool, is_admin: bool):
+    prop = config.oauth2.user.properties.get(key)
+    if prop is None:
+        raise HTTPException(400, f"{repr(key)}={repr(prop)} is not a valid property")
+    elif prop.can_edit is AccessType.nobody:
+        raise HTTPException(400, f"Cannot modify {repr(key)}")
+    elif prop.can_edit is AccessType.admin and not is_admin:
+        raise HTTPException(401, f"Cannot modify {repr(key)}")
+    elif prop.can_edit is AccessType.self and not (is_self or is_admin):
+        raise HTTPException(401, f"Cannot modify {repr(key)}")
 
 
-def update_user(
-        user_data: Dict[str, Any],
+async def update_user(
+        user_data: DotDict,
         update_data: Dict[str, Any],
         is_new: bool = False,
         is_registering: bool = False,
@@ -102,12 +143,14 @@ def update_user(
     if 'sub' in update_data or '_id' in update_data or 'picture' in update_data:
         raise HTTPException(400, f"Cannot modify 'sub', '_id' or 'picture'")
     was_active = user_data.get('active', False)
+    reset_user_cache = False
 
     if is_new:
         assert '_id' not in user_data
         user_data['_id'] = generate_token(48)
 
     if 'password' in update_data:
+        _validate_property_write('password', is_self, is_admin)
         if not isinstance(update_data['password'], str):
             raise HTTPException(400, f"{repr('password')} is not a string")
         if is_self and not is_registering and user_data.get('password') is not None:
@@ -125,88 +168,70 @@ def update_user(
             raise HTTPException(400, "Password is leaked and cannot be used. See https://haveibeenpwned.com/")
 
     if 'email' in update_data:
+        _validate_property_write('email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
+        if await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
+            raise HTTPException(400, "E-Mail address already in use, please use existing account")
         new_mail = update_data['email']
         locale = update_data.get('locale', user_data.get('locale', config.oauth2.user.properties['locale'].default))
         if locale is None:
             locale = 'en_us'
-        zoneinfo = update_data.get('zoneinfo', user_data.get('zoneinfo', config.oauth2.user.properties['zoneinfo'].default))
-        if zoneinfo is None:
-            tz = UTC
-        else:
-            try:
-                tz = timezone(zoneinfo)
-            except UnknownTimeZoneError:
-                tz = UTC
+        tz = _get_tz(update_data.get('zoneinfo', user_data.get('zoneinfo')))
         del update_data['email']
         if is_new:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
             token_valid_until = int(time.time() + config.manager.token_valid.registration)
-            user_data['registration_token'] = _create_token(user_data['_id'], token_valid_until)
+            user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
 
-            def send_mail():
-                mailer.send_mail(
-                    locale,
-                    'register',
-                    new_mail,
-                    {
-                        'registration_link': f"register/{user_data['registration_token']}",
-                        'valid_until': datetime.fromtimestamp(token_valid_until, tz),
-                        'user': user_data,
-                    },
-                )
+            async def send_mail():
+                await async_send_mail_register(user_data, token_valid_until, locale, tz)
         elif is_registering and update_data.get('email') == user_data['email']:
             user_data['email_verified'] = True
 
-            def send_mail():
+            async def send_mail():
                 pass
         elif not is_admin:
             token_valid_until = int(time.time() + config.manager.token_valid.email_set)
-            user_data['email_verification_token'] = _create_token(new_mail, token_valid_until)
+            user_data['email_verification_token'] = create_token(new_mail, token_valid_until)
             if is_registering:
                 user_data['email'] = new_mail
                 user_data['email_verified'] = False
 
-            def send_mail():
-                mailer.send_mail(
-                    locale,
-                    'verify_mail',
-                    new_mail,
-                    {
-                        'verify_link': f"verify-email/{user_data['email_verification_token']}",
-                        'valid_until': datetime.fromtimestamp(token_valid_until, tz),
-                        'user': user_data,
-                    },
-                )
+            async def send_mail():
+                await async_send_mail_verify(locale, new_mail, user_data, token_valid_until, tz)
         else:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
 
-            def send_mail():
+            async def send_mail():
                 pass
     else:
-        def send_mail():
+        async def send_mail():
             pass
 
     if 'groups' in update_data:
+        _validate_property_write('groups', is_self, is_admin)
+
         new_groups = update_data['groups']
-        if user_group_collection.count_documents({'_id': {'$in': new_groups}}) != len(new_groups):
+        if await async_user_group_collection.count_documents({'_id': {'$in': new_groups}}) != len(new_groups):
             raise HTTPException(404, "At least one group does not exist")
         added_groups = list(set(new_groups).difference(user_data['groups']))
         removed_groups = list(set(user_data['groups']).difference(new_groups))
         user_data['groups'] = new_groups
         if added_groups:
-            user_group_collection.update_many(
+            await async_user_group_collection.update_many(
                 {'_id': {'$in': added_groups}},
                 {'$addToSet': {'members': user_data['_id']}},
             )
+            reset_user_cache = True
         if removed_groups:
-            user_group_collection.update_many(
+            await async_user_group_collection.update_many(
                 {'_id': {'$in': removed_groups}},
                 {'$pull': {'members': user_data['_id']}},
             )
+            reset_user_cache = True
         del update_data['groups']
 
     for key, value in update_data.items():
@@ -239,7 +264,16 @@ def update_user(
             if not isinstance(value, str):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
             try:
-                user_data[key] = parse_datetime(value)
+                parse_datetime(value)
+                user_data[key] = value
+            except ValueError:
+                raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
+        elif prop.type == UserPropertyType.date:
+            if not isinstance(value, str):
+                raise HTTPException(400, f"{repr(key)}={repr(value)} is not a date string")
+            try:
+                parse_date(value)
+                user_data[key] = value
             except ValueError:
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
         elif prop.type == UserPropertyType.enum:
@@ -263,8 +297,8 @@ def update_user(
     if is_registering:
         user_data['active'] = True
 
-    # Apply all templates and validate required
-    if not is_new:
+    # Apply all templates and validate required, when not active
+    if user_data.get('active', False):
         # Validate that all required variables are present
         for key, value in config.oauth2.user.properties.items():
             if value.required and user_data.get(key) is None:
@@ -280,18 +314,23 @@ def update_user(
     User.validate(user_data)
 
     if is_new:
-        user_collection.insert_one(user_data)
+        await async_user_collection.insert_one(user_data)
     else:
-        user_collection.replace_one({'_id': user_data['_id']}, user_data)
+        await async_user_collection.replace_one({'_id': user_data['_id']}, user_data)
     if user_data.get('active', False):
-        client_user_cache_collection.update_many(
-            {'user_id': user_data['_id']},
-            {'$set': {'last_modified': user_data['updated_at']}},
-        )
+        if reset_user_cache:
+            await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
+        else:
+            await async_client_user_cache_collection.update_many(
+                {'user_id': user_data['_id']},
+                {'$set': {'last_modified': user_data['updated_at']}},
+            )
     elif was_active:
-        client_user_cache_collection.delete_many({'user_id': user_data['_id']})
-        token_collection.delete_many({'user_id': user_data['_id']})
-        session_collection.delete_many({'user_id': user_data['_id']})
-        authorization_code_collection.delete_many({'user_id': user_data['_id']})
+        await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
+        await async_token_collection.delete_many({'user_id': user_data['_id']})
+        await async_session_collection.delete_many({'user_id': user_data['_id']})
+        await async_authorization_code_collection.delete_many({'user_id': user_data['_id']})
+    elif reset_user_cache:
+        await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
     # Last: Send the email if there is one
-    send_mail()
+    await send_mail()

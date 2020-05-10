@@ -10,18 +10,22 @@ from authlib.oauth2 import OAuth2Request
 from fastapi import HTTPException, APIRouter
 from fastapi.params import Depends, Query, Body, Cookie, Header, Form
 from pydantic import BaseModel
-from pymongo.collection import Collection
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse, FileResponse, Response, StreamingResponse
 
 from user_manager.common.config import config
 from user_manager.common.models import User, Session
-from user_manager.common.mongo import user_collection, session_collection, token_collection, user_picture_bucket
+from user_manager.common.mongo import async_user_collection, async_session_collection, async_token_collection, \
+    async_user_picture_bucket
 from user_manager.common.password_helper import verify_and_update
 from .cors import CORSHelper
-from .oauth2 import authorization, ErrorJSONResponse, ErrorRedirectResponse, RedirectResponse, UserWithRoles, \
-    user_introspection, token_revocation, TypeHint, TypedRequest
+from .oauth2 import authorization, ErrorJSONResponse, ErrorRedirectResponse, RedirectResponse, user_introspection, \
+    token_revocation, TypeHint, TypedRequest
 from .oauth2_key import supported_alg_sig, jwks, JSONWebKeySet
+from .session import async_validate_session
+from .throttle import async_throttle_failure, async_throttle
+from .user_helper import UserWithRoles
 
 router = APIRouter()
 
@@ -63,21 +67,6 @@ async def oauth2_request(request: Request) -> TypedRequest:
 
 def add_session_state(response: RedirectResponse, user: UserWithRoles):
     response.headers['location'] = add_params_to_uri(response.headers['location'], [('session_state', user.last_modified)])
-
-
-def validate_session(sid: Optional[str], session_collection: Collection, user_collection: Collection) -> Optional[User]:
-    if sid is None:
-        return None
-    session_data = session_collection.find_one({'_id': sid})
-    if session_data is None:
-        return None
-    session = Session.validate(session_data)
-    if session.expiration_time < datetime.utcnow():
-        return None
-    user_data = user_collection.find_one({'_id': session.user_id})
-    if user_data is None:
-        return None
-    return User.validate(user_data)
 
 
 class ErrorResult(BaseModel):
@@ -125,10 +114,12 @@ async def enter_authorization(
         session_state: Optional[str] = Cookie(None, alias=COOKIE_KEY_STATE),
 ):
     """Enter the authorization process. May redirect to login page or return directly."""
-    user = validate_session(sid, session_collection, user_collection)
+    user = await async_validate_session(sid)
+
     if user is not None and user.active:
-        user_with_groups = UserWithRoles.load_groups(user, _query_params.client_id)
-        resp = authorization.create_authorization_response(
+        user_with_groups = await UserWithRoles.async_load_groups(user, _query_params.client_id)
+        resp = await run_in_threadpool(
+            authorization.create_authorization_response,
             request=await oauth2_request(request),
             grant_user=user_with_groups,
         )
@@ -176,23 +167,26 @@ async def authorize(
         auth_credentials: AuthCredentials = Body(...),
 ):
     """Perform authorization from given credentials and returns the result."""
-    potential_users = user_collection.find({'email': auth_credentials.email})
-    for potential_user in potential_users:
+    await async_throttle(request)
+    potential_users = async_user_collection.find({'email': auth_credentials.email})
+    async for potential_user in potential_users:
         if potential_user.get('password') is not None:
             password_valid, new_hash = verify_and_update(auth_credentials.password, potential_user['password'])
             if password_valid:
                 user_data = potential_user
                 break
     else:
+        await async_throttle_failure(request)
         raise HTTPException(401)
 
     user = User.validate(user_data)
     if new_hash is not None:
-        user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
+        await async_user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
         user.password = new_hash
-    user_group_data = UserWithRoles.load_groups(user, _query_params.client_id)
+    user_group_data = await UserWithRoles.async_load_groups(user, _query_params.client_id)
     oauth_request = await oauth2_request(request)
-    resp = authorization.create_authorization_response(
+    resp = await run_in_threadpool(
+        authorization.create_authorization_response,
         request=oauth_request,
         grant_user=user_group_data,
     )
@@ -213,7 +207,7 @@ async def authorize(
                 expires_in=expires_in,
                 expiration_time=datetime.utcnow() + timedelta(seconds=expires_in),
             )
-            session_collection.insert_one(sess.dict(exclude_none=True, by_alias=True))
+            await async_session_collection.insert_one(sess.dict(exclude_none=True, by_alias=True))
             resp.set_cookie(
                 key=COOKIE_KEY_SID,
                 value=sess.id,
@@ -299,9 +293,15 @@ async def post_issue_token(
         session_state: Optional[str] = Cookie(None, alias=COOKIE_KEY_STATE),
 ):
     """Issues a token for a token request."""
+    await async_throttle(request)
     oauth_request = await oauth2_request(request)
-    response: Response = authorization.create_token_response(request=oauth_request)
+    response: Response = await run_in_threadpool(
+        authorization.create_token_response,
+        request=oauth_request
+    )
     allow_all_get_post_cors.augment(request, response)
+    if isinstance(response, ErrorJSONResponse):
+        await async_throttle_failure(request)
     if (isinstance(response, JSONResponse) and not isinstance(response, ErrorJSONResponse) and
             str(oauth_request.user.last_modified) != session_state):
         response.set_cookie(
@@ -330,9 +330,15 @@ async def get_issue_token(
         session_state: Optional[str] = Cookie(None, alias=COOKIE_KEY_STATE),
 ):
     """Issues a token for a token request."""
+    await async_throttle(request)
     oauth_request = await oauth2_request(request)
-    response: Response = authorization.create_token_response(request=oauth_request)
+    response: Response = await run_in_threadpool(
+        authorization.create_token_response,
+        request=oauth_request
+    )
     allow_all_get_post_cors.augment(request, response)
+    if isinstance(response, ErrorJSONResponse):
+        await async_throttle_failure(request)
     if isinstance(response, JSONResponse) and str(oauth_request.user.last_modified) != session_state:
         response.set_cookie(
             key=COOKIE_KEY_STATE,
@@ -365,7 +371,12 @@ async def post_revoke_token(
         token_type_hint: Optional[TypeHint] = Form(None),
 ):
     """Revokes a token."""
-    response: Response = token_revocation.create_response(token, token_type_hint, request=await oauth2_request(request))
+    response: Response = await run_in_threadpool(
+        token_revocation.create_response,
+        token,
+        token_type_hint,
+        request=await oauth2_request(request),
+    )
     allow_all_post_cors.augment(request, response)
     return response
 
@@ -385,7 +396,10 @@ async def get_userinfo(
 ):
     """Introspect self."""
     oauth_request = await oauth2_request(request)
-    response: Response = user_introspection.create_response(oauth_request)
+    response: Response = await run_in_threadpool(
+        user_introspection.create_response,
+        oauth_request,
+    )
     allow_all_get_cors.augment(request, response)
 
     if str(oauth_request.user.last_modified) != session_state:
@@ -399,13 +413,13 @@ async def get_userinfo(
     return response
 
 
-def _get_picture(
+async def _async_get_picture(
         picture_id: str,
         if_none_match: str = Header(None),
         if_match: str = Header(None),
 ) -> Tuple[gridfs.GridOut, dict]:
     try:
-        stream = user_picture_bucket.open_download_stream(picture_id)
+        stream = await async_user_picture_bucket.open_download_stream(picture_id)
     except gridfs.errors.NoFile:
         raise HTTPException(404)
     file_hash = stream.metadata['hash'].hex()
@@ -427,14 +441,14 @@ async def get_picture_options(request: Request):
     '/picture/{picture_id}',
     tags=['User Manager'],
 )
-def get_picture_meta(
+async def get_picture_meta(
         picture_id: str,
         if_none_match: str = Header(None),
         if_match: str = Header(None),
 ):
     """Get picture metadata."""
     try:
-        stream, headers = _get_picture(picture_id, if_none_match, if_match)
+        stream, headers = await _async_get_picture(picture_id, if_none_match, if_match)
         stream.close()
     except HTTPException as e:
         return Response(status_code=e.status_code)
@@ -445,23 +459,24 @@ def get_picture_meta(
     '/picture/{picture_id}',
     tags=['User Manager'],
 )
-def get_picture(
+async def get_picture(
         picture_id: str,
         if_none_match: str = Header(None),
         if_match: str = Header(None),
 ):
     """Get picture data."""
     try:
-        stream, headers = _get_picture(picture_id, if_none_match, if_match)
+        stream, headers = await _async_get_picture(picture_id, if_none_match, if_match)
     except HTTPException as e:
         return Response(status_code=e.status_code)
 
-    def stream_iterator():
+    async def stream_iterator():
         while True:
-            chunk = stream.readchunk()
+            chunk = await stream.readchunk()
             if not chunk:
                 break
             yield chunk
+        stream.close()
 
     return StreamingResponse(
         stream_iterator(), media_type=stream.metadata['content_type'], headers=headers
@@ -471,7 +486,7 @@ def get_picture(
 @router.get(
     '/login-status-iframe.html',
 )
-def get_login_status_iframe():
+async def get_login_status_iframe():
     return FileResponse(status_iframe_path, media_type='text/html')
 
 
@@ -490,9 +505,9 @@ async def end_session(
 ):
     """Ends the session."""
     if sid is not None:
-        session_collection.delete_one({'_id': sid})
+        await async_session_collection.delete_one({'_id': sid})
     if id_token_hint is not None:
-        token_collection.delete_one({'access_token': id_token_hint})
+        await async_token_collection.delete_one({'access_token': id_token_hint})
     if post_logout_redirect_uri is not None:
         if state is not None:
             if '#' in post_logout_redirect_uri:

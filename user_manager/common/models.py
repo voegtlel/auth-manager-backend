@@ -121,6 +121,19 @@ class Session(BaseDocument):
     expiration_time: datetime = ...
 
 
+class IpLoginThrottle(BaseDocument):
+    __indexes__ = [
+        IndexModel([('forget_time', ASCENDING)], expireAfterSeconds=0),
+    ]
+    __collection_name__ = 'ipLoginThrottle'
+
+    ip: str = Field(..., alias='_id')
+
+    retries: int = 1
+    last_retry: datetime = ...
+    forget_time: datetime = ...
+
+
 class AccessGroup(BaseSubDocument):
     group: str
     roles: List[str]
@@ -228,10 +241,11 @@ class User(BaseDocument):
         extra = Extra.allow
 
     __indexes__ = [
-        IndexModel([('email', HASHED)]),
+        IndexModel([('email', ASCENDING)], unique=True),
         IndexModel([('registration_token', HASHED)]),
         IndexModel([('email_verification_token', HASHED)]),
         IndexModel([('password_reset_token', HASHED)]),
+        IndexModel([('groups', ASCENDING)]),
     ]
     __collection_name__ = 'user'
 

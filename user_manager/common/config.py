@@ -74,6 +74,7 @@ class UserPropertyType(str, Enum):
     str = 'str'
     multistr = 'multistr'
     datetime = 'datetime'
+    date = 'date'
     bool = 'bool'
     enum = 'enum'
     password = 'password'
@@ -188,6 +189,13 @@ class MailConfig(BaseModel):
     password: Optional[str]
 
 
+class OAuth2LoginThrottler(BaseModel):
+    enable: bool = ...
+    base_delay: float = ...
+    max_delay: float = ...
+    reset_cutoff: int = ...
+
+
 class OAuth2Config(BaseModel):
     base_url: str
 
@@ -199,6 +207,8 @@ class OAuth2Config(BaseModel):
     token_length: int = ...
     access_token_length: int = ...
     authorization_code_length: int = ...
+
+    login_throttler: OAuth2LoginThrottler
 
     user: UserScopes = ...
 
