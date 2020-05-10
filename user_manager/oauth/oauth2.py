@@ -46,7 +46,7 @@ class RedirectResponse(Response):
     def to_json_response(self) -> JSONResponse:
         return JSONResponse(
             content={'redirect_url': self.headers['Location']},
-            status_code=401,
+            status_code=200,
             headers=dict(default_json_headers),
         )
 

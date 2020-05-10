@@ -400,6 +400,7 @@ async def upload_picture(
             raise HTTPException(401)
         user_data = await async_user_collection.find_one({'_id': user_id})
     elif registration_token is not None:
+        check_token(registration_token)
         user_data = await async_user_collection.find_one({'registration_token': registration_token})
     else:
         raise HTTPException(401)

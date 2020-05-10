@@ -242,6 +242,7 @@ class User(BaseDocument):
 
     __indexes__ = [
         IndexModel([('email', ASCENDING)], unique=True),
+        IndexModel([('preferred_username', ASCENDING)], unique=True),
         IndexModel([('registration_token', HASHED)]),
         IndexModel([('email_verification_token', HASHED)]),
         IndexModel([('password_reset_token', HASHED)]),
@@ -266,7 +267,9 @@ class User(BaseDocument):
     phone_number: Optional[str] = None
     phone_number_verified: bool = False
 
-    # preferred_username: str
+    preferred_username: Optional[str]
+    given_name: Optional[str]
+    family_name: Optional[str]
 
     picture: Optional[str]
 

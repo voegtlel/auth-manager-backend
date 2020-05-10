@@ -6,6 +6,7 @@ from typing import Optional, Any, Dict, List, cast, Tuple
 import gridfs
 from authlib.common.security import generate_token
 from authlib.common.urls import add_params_to_uri
+from authlib.consts import default_json_headers
 from authlib.oauth2 import OAuth2Request
 from fastapi import HTTPException, APIRouter
 from fastapi.params import Depends, Query, Body, Cookie, Header, Form
@@ -183,6 +184,29 @@ async def authorize(
     if new_hash is not None:
         await async_user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
         user.password = new_hash
+    if user.registration_token:
+        # If the user password is correct, but a registration token is pending, redirect to registration page
+        from ..manager.api.user_helpers import check_token, create_token
+        import urllib.parse
+        registration_token = user.registration_token
+        try:
+            check_token(user.registration_token)
+        except HTTPException:
+            token_valid_until = int(time.time() + config.manager.token_valid.registration)
+            registration_token = create_token(user_data['_id'], token_valid_until)
+            await async_user_collection.update_one(
+                {'_id': user.id},
+                {'$set': {'registration_token': registration_token}},
+            )
+        return_url = urllib.parse.quote_plus(str(request.url))
+        return JSONResponse(
+            content={
+                'redirect_url': f"{config.manager.frontend_base_url}/register/{registration_token}"
+                                f"?return_url={return_url}"
+            },
+            status_code=200,
+            headers=dict(default_json_headers),
+        )
     user_group_data = await UserWithRoles.async_load_groups(user, _query_params.client_id)
     oauth_request = await oauth2_request(request)
     resp = await run_in_threadpool(

@@ -108,8 +108,9 @@ class UserProperty(BaseModel):
     format_help: Optional[str]
     can_edit: AccessType = AccessType.nobody
     can_read: AccessType = AccessType.everybody
+    write_once: bool = False
     default: Optional[Any]
-    visible: bool = True
+    visible: AccessType = AccessType.everybody
     title: Optional[str]
     values: Optional[List[EnumValue]]
     template: Optional[str]
@@ -207,6 +208,8 @@ class OAuth2Config(BaseModel):
     token_length: int = ...
     access_token_length: int = ...
     authorization_code_length: int = ...
+
+    use_german_username_translation: bool = False
 
     login_throttler: OAuth2LoginThrottler
 

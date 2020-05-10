@@ -1,3 +1,4 @@
+import re
 import time
 from base64 import b64encode, b64decode
 from datetime import datetime
@@ -8,15 +9,28 @@ from fastapi import HTTPException
 from pydantic.datetime_parse import parse_datetime, parse_date
 from pyisemail import is_email
 from pytz import UTC, timezone, UnknownTimeZoneError
+from unidecode import unidecode
 
-from user_manager.common.config import config, AccessType, UserPropertyType
+from user_manager.common.config import config, UserPropertyType
 from user_manager.common.models import User
 from user_manager.common.mongo import async_user_collection, \
     async_client_user_cache_collection, async_authorization_code_collection, async_session_collection, \
-    async_token_collection, async_user_group_collection
+    async_token_collection, async_user_group_collection, user_collection
 from user_manager.common.password_helper import verify_and_update, create_password, PasswordLeakedException
 from user_manager.manager.helper import get_regex, DotDict
 from user_manager.manager.mailer import mailer
+
+replace_dot_re = re.compile(r'\b[\s]+\b')
+remove_re = re.compile(r'[^a-z0-9.-]')
+
+
+def normalize_username(display_name: str) -> str:
+    if config.oauth2.use_german_username_translation:
+        display_name = display_name.replace('ä', 'ae').replace('ö', 'oe').replace('ü', 'ue')
+    username = unidecode(display_name).lower()
+    username = replace_dot_re.sub('.', username)
+    username = remove_re.sub('', username)
+    return username
 
 
 def _get_tz(zoneinfo: str = None) -> datetime.tzinfo:
@@ -124,12 +138,17 @@ def _validate_property_write(key: str, is_self: bool, is_admin: bool):
     prop = config.oauth2.user.properties.get(key)
     if prop is None:
         raise HTTPException(400, f"{repr(key)}={repr(prop)} is not a valid property")
-    elif prop.can_edit is AccessType.nobody:
+    elif not prop.can_edit.has_access(is_self, is_admin):
         raise HTTPException(400, f"Cannot modify {repr(key)}")
-    elif prop.can_edit is AccessType.admin and not is_admin:
-        raise HTTPException(401, f"Cannot modify {repr(key)}")
-    elif prop.can_edit is AccessType.self and not (is_self or is_admin):
-        raise HTTPException(401, f"Cannot modify {repr(key)}")
+
+
+def make_username(name: str) -> str:
+    username = base_username = normalize_username(name)
+    username_counter = 2
+    while user_collection.count_documents({'preferred_username': username}, limit=1) != 0:
+        username = base_username + str(username_counter)
+        username_counter += 1
+    return username
 
 
 async def update_user(
@@ -235,15 +254,10 @@ async def update_user(
         del update_data['groups']
 
     for key, value in update_data.items():
-        prop = config.oauth2.user.properties.get(key)
-        if prop is None:
-            raise HTTPException(400, f"{repr(key)}={repr(value)} is not a valid property")
-        elif prop.can_edit is AccessType.nobody:
-            raise HTTPException(400, f"Cannot modify {repr(key)}")
-        elif prop.can_edit is AccessType.admin and not is_admin:
-            raise HTTPException(401, f"Cannot modify {repr(key)}")
-        elif prop.can_edit is AccessType.self and not (is_self or is_admin):
-            raise HTTPException(401, f"Cannot modify {repr(key)}")
+        _validate_property_write(key, is_self, is_admin)
+        prop = config.oauth2.user.properties[key]
+        if prop.write_once and user_data.get(key) is not None:
+            raise HTTPException(400, f"{repr(key)} can only be set once")
         if value is None and not prop.required:
             del user_data[key]
         if prop.type in (UserPropertyType.str, UserPropertyType.multistr):
@@ -305,9 +319,12 @@ async def update_user(
                 raise HTTPException(400, f"Missing {repr(key)}")
         # Apply templates (they should not be required)
         for key, value in config.oauth2.user.properties.items():
-            if value.type == UserPropertyType.str and value.template is not None:
+            if (
+                    value.type == UserPropertyType.str and value.template is not None and
+                    (not value.write_once or not user_data.get(key))
+            ):
                 assert "'''" not in value.template, f"Invalid ''' in template: {value.template}"
-                user_data[key] = eval(f"f'''{value.template}'''", {}, user_data)
+                user_data[key] = eval(f"f'''{value.template}'''", {'make_username': make_username}, user_data)
 
     user_data['updated_at'] = int(time.time())
 

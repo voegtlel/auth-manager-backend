@@ -1,5 +1,5 @@
+import asyncio
 import math
-import time
 from datetime import datetime, timedelta
 
 from starlette.requests import Request
@@ -13,20 +13,6 @@ _max_throttle_count = int(
 )
 
 
-def throttle(request: Request):
-    if not config.oauth2.login_throttler.enable:
-        return 0
-    print(f"Throttle check from {request.client.host}")
-    throttle_data = ip_login_throttle_collection.find_one({'_id': request.client.host})
-    if throttle_data is None:
-        return 0
-    throttle = IpLoginThrottle.validate(throttle_data)
-    delay = min(
-        config.oauth2.login_throttler.base_delay * 2 ** throttle.retries, config.oauth2.login_throttler.max_delay
-    )
-    time.sleep(delay)
-
-
 async def async_throttle(request: Request):
     if not config.oauth2.login_throttler.enable:
         return 0
@@ -36,9 +22,9 @@ async def async_throttle(request: Request):
         return 0
     throttle = IpLoginThrottle.validate(throttle_data)
     delay = min(
-        config.oauth2.login_throttler.base_delay * 2 ** throttle.retries, config.oauth2.login_throttler.max_delay
+        config.oauth2.login_throttler.base_delay * (2 ** throttle.retries), config.oauth2.login_throttler.max_delay
     )
-    time.sleep(delay)
+    await asyncio.sleep(delay)
 
 
 def throttle_failure(request: Request):
@@ -59,7 +45,7 @@ def throttle_failure(request: Request):
         throttle.retries = max(throttle.retries + 1, _max_throttle_count)
         throttle.last_retry = now
         throttle.forget_time = now + timedelta(seconds=config.oauth2.login_throttler.reset_cutoff)
-        ip_login_throttle_collection.update_one({'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True))
+        ip_login_throttle_collection.replace_one({'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True))
 
 
 async def async_throttle_failure(request: Request):
@@ -80,4 +66,4 @@ async def async_throttle_failure(request: Request):
         throttle.retries = max(throttle.retries + 1, _max_throttle_count)
         throttle.last_retry = now
         throttle.forget_time = now + timedelta(seconds=config.oauth2.login_throttler.reset_cutoff)
-        await async_ip_login_throttle_collection.update_one({'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True))
+        await async_ip_login_throttle_collection.replace_one({'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True))

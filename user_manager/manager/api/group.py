@@ -153,6 +153,7 @@ async def delete_group(
         {'$pull': {'access_groups': {'group': group_id}}},
     )
     await async_client_user_cache_collection.delete_many({'groups': group_id})
+    await async_user_group_collection.update_many({'member_groups': group_id}, {'$pull': {'member_groups': group_id}})
     result = await async_user_group_collection.delete_one({'_id': group_id})
     if result.deleted_count != 1:
         raise HTTPException(404)

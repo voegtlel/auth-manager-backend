@@ -22,6 +22,8 @@ oauth2:
   access_token_length: 32
   authorization_code_length: 48
 
+  use_german_username_translation: true
+
   login_throttler:
     enable: true
     base_delay: 0.1
@@ -39,6 +41,8 @@ oauth2:
         title: "Active"
         default: false
         can_edit: admin
+        can_read: self
+        visible: admin
       email:
         type: email
         title: "E-Mail"
@@ -64,7 +68,7 @@ oauth2:
       name:
         type: str
         title: "Name"
-        visible: false
+        visible: admin
         template: "{given_name} {family_name}"
       family_name:
         type: str
@@ -72,27 +76,29 @@ oauth2:
         required: true
         format: '^[\p{L} -]+$'
         format_help: "printable characters"
-        #can_edit: self
-        can_edit: admin
+        can_edit: self
       given_name:
         type: str
         title: "Given Name"
         required: true
         format: '^[\p{L} -]+$'
         format_help: "printable characters"
-        #can_edit: self
-        can_edit: admin
+        can_edit: self
       # middle_name
       # nickname
       preferred_username:
+        # This is generated in the backend from 'name'
         type: str
-        title: "Preferred Username"
-        visible: false
-        template: "{given_name.replace(' ', '.').lower()}.{family_name.lower()}"
+        title: "Preferred Username (ID)"
+        visible: admin
+        can_edit: nobody
+        can_read: admin
+        write_once: true
+        template: "{make_username(name)}"
       profile:
         type: str
         title: "Profile URL"
-        visible: false
+        visible: nobody
       picture:
         type: picture
         title: "Picture"
@@ -129,7 +135,7 @@ oauth2:
             title: Europe/Berlin
         can_edit: self
         can_read: self
-        visible: false
+        visible: admin
       locale:
         type: enum
         title: "Preferred Language"
@@ -180,7 +186,7 @@ oauth2:
       updated_at:
         type: datetime
         title: "Updated At"
-        visible: false
+        visible: admin
         can_read: self
       password:
         type: password
@@ -204,7 +210,7 @@ oauth2:
         title: "Card ID"
         can_edit: self
         can_read: admin
-        visible: false
+        visible: admin
         format: '^[0-9a-fA-F]*$'
     scopes:
       email:
