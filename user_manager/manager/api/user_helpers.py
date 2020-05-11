@@ -186,7 +186,12 @@ async def update_user(
         except PasswordLeakedException:
             raise HTTPException(400, "Password is leaked and cannot be used. See https://haveibeenpwned.com/")
 
-    if 'email' in update_data:
+    async def send_mail():
+        pass
+
+    if is_registering and update_data.get('email', user_data['email']) == user_data['email']:
+        user_data['email_verified'] = True
+    elif 'email' in update_data:
         _validate_property_write('email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
@@ -206,11 +211,6 @@ async def update_user(
 
             async def send_mail():
                 await async_send_mail_register(user_data, token_valid_until, locale, tz)
-        elif is_registering and update_data.get('email') == user_data['email']:
-            user_data['email_verified'] = True
-
-            async def send_mail():
-                pass
         elif not is_admin:
             token_valid_until = int(time.time() + config.manager.token_valid.email_set)
             user_data['email_verification_token'] = create_token(new_mail, token_valid_until)
@@ -223,12 +223,6 @@ async def update_user(
         else:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
-
-            async def send_mail():
-                pass
-    else:
-        async def send_mail():
-            pass
 
     if 'groups' in update_data:
         _validate_property_write('groups', is_self, is_admin)
@@ -258,7 +252,7 @@ async def update_user(
         prop = config.oauth2.user.properties[key]
         if prop.write_once and user_data.get(key) is not None:
             raise HTTPException(400, f"{repr(key)} can only be set once")
-        if value is None and not prop.required:
+        if not value and not prop.required and key in user_data:
             del user_data[key]
         if prop.type in (UserPropertyType.str, UserPropertyType.multistr):
             if not isinstance(value, str):
@@ -302,7 +296,7 @@ async def update_user(
             raise NotImplementedError()
 
     # Set others to default
-    if is_new:
+    if is_new or is_registering:
         for key, value in config.oauth2.user.properties.items():
             if value.default is not None and key not in user_data:
                 user_data[key] = value.default

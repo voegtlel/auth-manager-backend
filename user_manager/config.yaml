@@ -67,7 +67,7 @@ oauth2:
         can_edit: admin
       name:
         type: str
-        title: "Name"
+        title: "Display Name"
         visible: admin
         template: "{given_name} {family_name}"
       family_name:
@@ -287,10 +287,13 @@ manager:
     - password
     - active
     - email_verified
-    - phone_number_verified
+    - preferred_username
+    - name
     - given_name
     - family_name
     - phone_number
+    - phone_number_verified
+    - zoneinfo
     - locale
     - birthdate
     - gender
@@ -301,6 +304,8 @@ manager:
     - address.country
     - notes
     - groups
+    - updated_at
+    - card_id
 
   registration:
     - picture
@@ -317,3 +322,4 @@ manager:
     - address.locality
     - address.region
     - address.country
+    - active

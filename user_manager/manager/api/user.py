@@ -25,9 +25,18 @@ from user_manager.manager.models.user import PasswordReset
 router = APIRouter()
 
 
-def _get_user_property_value(prop: str, user_data: dict, is_self: bool = False, is_admin: bool = False) -> Any:
-    if config.oauth2.user.properties[prop].can_read.has_access(is_self, is_admin):
-        return user_data.get(prop)
+def _get_user_property_value(
+        prop_key: str,
+        user_data: dict,
+        is_self: bool = False,
+        is_admin: bool = False,
+        is_registering: bool = False,
+) -> Any:
+    prop = config.oauth2.user.properties[prop_key]
+    if prop.can_read.has_access(is_self, is_admin):
+        if is_registering and user_data.get(prop_key) is None and prop.default:
+            return prop.default
+        return user_data.get(prop_key)
     return None
 
 
@@ -93,10 +102,10 @@ def get_create_user(
         properties=[
             UserPropertyWithValue(
                 key=prop,
-                value=None,
+                value=config.oauth2.user.properties[prop].default,
                 **config.oauth2.user.properties[prop].dict()
             )
-            for prop in config.manager.registration
+            for prop in config.manager.view
             if config.oauth2.user.properties[prop].can_read.has_access(is_admin=is_admin)
             or config.oauth2.user.properties[prop].can_edit.has_access(is_admin=is_admin)
         ]
@@ -160,12 +169,14 @@ async def get_register_user(
         user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
     if 'password' in user_data:
         del user_data['password']
+    # User will be active afterwards, send active
+    user_data['active'] = True
     return UserViewData(
         user_id=user_data['_id'],
         properties=[
             UserPropertyWithValue(
                 key=prop,
-                value=_get_user_property_value(prop, user_data, is_self=True),
+                value=_get_user_property_value(prop, user_data, is_self=True, is_registering=True),
                 **config.oauth2.user.properties[prop].dict()
             )
             for prop in config.manager.registration
