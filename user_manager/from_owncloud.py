@@ -285,8 +285,10 @@ if __name__ == '__main__':
     #    registration_token=create_token(),
     #).dict(exclude_none=True, by_alias=True))
 
-    mongo.user_collection.insert_many(users)
-    mongo.user_group_collection.insert_many(groups)
+    if users:
+        mongo.user_collection.insert_many(users)
+    if groups:
+        mongo.user_group_collection.insert_many(groups)
     mongo.user_group_collection.update_one(
         {'_id': 'users'},
         {'$addToSet': {'members': {'$each': list(user_mapping.values())}}}
