@@ -146,49 +146,42 @@ if __name__ == '__main__':
         '--dbtype',
         type=str,
         choices=['mysql', 'pgsql'],
-        nargs=1,
         help="or use environment variable DB_TYPE",
         default=os.environ.get('DB_TYPE', 'mysql'),
     )
     parser.add_argument(
         '--dbname',
         type=str,
-        nargs=1,
         help="or use environment variable DB_NAME",
         default=os.environ.get('DB_NAME', 'nextcloud'),
     )
     parser.add_argument(
         '--dbhost',
         type=str,
-        nargs=1,
         help="or use environment variable DB_HOST",
         default=os.environ.get('DB_HOST', 'localhost'),
     )
     parser.add_argument(
         '--dbport',
         type=int,
-        nargs=1,
         help="or use environment variable DB_PORT",
         default=os.environ.get('DB_PORT', 3306),
     )
     parser.add_argument(
         '--dbuser',
         type=str,
-        nargs=1,
         help="or use environment variable DB_USER",
         default=os.environ.get('DB_USER', 'root'),
     )
     parser.add_argument(
         '--dbpassword',
         type=str,
-        nargs=1,
         help="or use environment variable DB_PASSWORD",
         default=os.environ.get('DB_PASSWORD'),
     )
     parser.add_argument(
         '--dbtableprefix',
         type=str,
-        nargs=1,
         help="or use environment variable DB_TABLE_PREFIX",
         default=os.environ.get('DB_TABLE_PREFIX', 'oc_'),
     )
@@ -215,12 +208,15 @@ if __name__ == '__main__':
             given_name = user.display_name
             family_name = ""
         if user.email is None:
-            print("Skipping", user)
+            print("Skip", user)
             continue
         existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1})
         if existing_user is not None:
-            print("Skipping", user)
+            print("Update", user)
             user_mapping[user.uid] = existing_user['_id']
+            mongo.user_collection.update_one(
+                {'_id': existing_user['_id']}, {'$addToSet': {'groups': {'$each': user.groups}}}
+            )
             continue
 
         preferred_username = base_username = normalize_username(user.display_name)
@@ -257,17 +253,17 @@ if __name__ == '__main__':
                 registration_token='imported',
             ).dict(exclude_none=True, by_alias=True)
         )
-        print("User:", users[-1])
+        print("Create", users[-1])
 
     groups = []
     for group in reader.read_groups():
         members = [user_mapping[member] for member in group.members]
         if mongo.user_group_collection.count_documents({'_id': group.gid}, limit=1) != 0:
             mongo.user_group_collection.update_one(
-                {'_id': 'users'},
+                {'_id': group.gid},
                 {'$addToSet': {'members': {'$each': members}}}
             )
-            print(f"Skipping group {group.gid}")
+            print(f"Update group {group.gid}")
         else:
             groups.append(UserGroup(
                 id=group.gid,
@@ -277,7 +273,7 @@ if __name__ == '__main__':
                 member_groups=[],
                 members=members,
             ).dict(exclude_none=True, by_alias=True))
-            print("Group:", groups[-1])
+            print("Create group", groups[-1])
 
     #mongo.user_collection.insert_one(User(
     #    id=generate_token(48),
