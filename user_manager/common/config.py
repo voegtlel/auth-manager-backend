@@ -73,6 +73,7 @@ class OAuthFieldType(Enum):
 class UserPropertyType(str, Enum):
     str = 'str'
     multistr = 'multistr'
+    int = 'int'
     datetime = 'datetime'
     date = 'date'
     bool = 'bool'

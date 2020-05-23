@@ -450,58 +450,6 @@ async def upload_picture(
     )
 
 
-@router.post(
-    '/users/{user_id}/groups/{group_id}',
-    tags=['User Manager']
-)
-async def add_user_group(
-        user_id: str,
-        group_id: str,
-        user: UserInfo = Depends(Authentication())
-):
-    """Add group to user."""
-    if 'admin' not in user['roles']:
-        raise HTTPException(401)
-    if await async_user_collection.count_documents({'_id': user_id}) != 1:
-        raise HTTPException(404, "User does not exist")
-    if await async_user_group_collection.count_documents({'_id': group_id}) != 1:
-        raise HTTPException(404, "Group does not exist")
-    await async_user_collection.update_one(
-        {'_id': user_id},
-        {
-            '$addToSet': {'groups': group_id},
-            '$set': {'updated_at': int(time.time())},
-        }
-    )
-    await async_user_group_collection.update_one({'_id': group_id}, {'$addToSet': {'members': user_id}})
-    await async_client_user_cache_collection.delete_many({'user_id': user_id})
-
-
-@router.delete(
-    '/users/{user_id}/groups/{group_id}',
-    tags=['User Manager']
-)
-async def remove_user_group(
-        user_id: str,
-        group_id: str,
-        user: UserInfo = Depends(Authentication()),
-):
-    """Remove group from user."""
-    if 'admin' not in user['roles']:
-        raise HTTPException(401)
-    if await async_user_collection.count_documents({'_id': user_id}) != 1:
-        raise HTTPException(404, "User does not exist")
-    await async_user_collection.update_one(
-        {'_id': user_id},
-        {
-            '$pull': {'groups': group_id},
-            '$set': {'updated_at': int(time.time())},
-        }
-    )
-    await async_user_group_collection.update_one({'_id': group_id}, {'$pull': {'members': user_id}})
-    await async_client_user_cache_collection.delete_many({'user_id': user_id})
-
-
 @router.delete(
     '/users/{user_id}',
     tags=['User Manager']
@@ -523,5 +471,15 @@ async def remove_user(
     await async_session_collection.delete({'user_id': user_id})
     await async_authorization_code_collection.delete({'user_id': user_id})
     await async_token_collection.delete({'user_id': user_id})
-    await async_user_group_collection.update_many({'members': user_id}, {'$pull': {'members': user_id}})
+    await async_user_group_collection.update_many(
+        {'members': user_id},
+        {
+            '$pull': {
+                'members': user_id,
+                'email_forward_members': user_id,
+                'email_allowed_forward_members': user_id,
+                'email_postbox_access_members': user_id,
+            }
+        }
+    )
     await async_client_user_cache_collection.delete_many({'user_id': user_id})

@@ -22,6 +22,12 @@ class BaseDocument(BaseSubDocument):
     __indexes__: List[IndexModel] = []
     __collection_name__: str
 
+    def update_from(self, src_doc):
+        if isinstance(src_doc, BaseModel):
+            for key in src_doc.__fields__.keys():
+                if key in self.__fields__:
+                    setattr(self, key, getattr(src_doc, key))
+
 
 class AuthorizationCode(BaseDocument, AuthorizationCodeMixin):
     __indexes__ = [
@@ -234,6 +240,13 @@ class UserGroup(BaseDocument):
     member_groups: List[str] = []
     members: List[str] = []
 
+    enable_email: bool = False
+    enable_postbox: bool = False
+    postbox_quota: int = 0
+    email_forward_members: List[str] = []
+    email_allowed_forward_members: List[str] = []
+    email_postbox_access_members: List[str] = []
+
 
 class User(BaseDocument):
 
@@ -278,3 +291,6 @@ class User(BaseDocument):
     updated_at: Optional[int]
 
     groups: List[str] = []
+    email_allowed_forward_groups: List[str] = []
+    email_forward_groups: List[str] = []
+    email_postbox_access_groups: List[str] = []

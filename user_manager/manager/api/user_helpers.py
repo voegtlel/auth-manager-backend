@@ -2,7 +2,7 @@ import re
 import time
 from base64 import b64encode, b64decode
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Sequence, List
 
 from authlib.common.security import generate_token
 from fastapi import HTTPException
@@ -151,6 +151,58 @@ def make_username(name: str) -> str:
     return username
 
 
+async def _update_groups(
+        user_data: DotDict,
+        update_data: Dict[str, Any],
+        property: str,
+        is_self: bool,
+        is_admin: bool,
+        existence_check_property: Optional[str],
+        groups_add_property: str,
+        groups_pull_properties: Sequence[str],
+        members_pull_properties: Sequence[str] = (),
+) -> bool:
+    _validate_property_write(property, is_self, is_admin)
+
+    reset_user_cache = False
+
+    new_groups = update_data[property]
+    new_groups_set = set(new_groups)
+    if existence_check_property is None:
+        if await async_user_group_collection.count_documents({'_id': {'$in': new_groups}}) != len(new_groups):
+            raise HTTPException(400, "At least one group does not exist")
+    else:
+        if not new_groups_set.issubset(user_data[existence_check_property]):
+            raise HTTPException(400, f"{property} contains invalid group")
+    added_groups = list(new_groups_set.difference(user_data[property]))
+    removed_groups = list(set(user_data[property]).difference(new_groups))
+    user_data[property] = new_groups
+    if added_groups:
+        await async_user_group_collection.update_many(
+            {'_id': {'$in': added_groups}},
+            {'$addToSet': {groups_add_property: user_data['_id']}},
+        )
+        reset_user_cache = True
+    if removed_groups:
+        await async_user_group_collection.update_many(
+            {'_id': {'$in': removed_groups}},
+            {'$pull': {
+                prop: user_data['_id']
+                for prop in groups_pull_properties
+            }},
+        )
+        for member_property_attr in members_pull_properties:
+            member_property: List[str] = user_data.get(member_property_attr, [])
+            for group in removed_groups:
+                try:
+                    member_property.remove(group)
+                except ValueError:
+                    pass
+        reset_user_cache = True
+    del update_data[property]
+    return reset_user_cache
+
+
 async def update_user(
         user_data: DotDict,
         update_data: Dict[str, Any],
@@ -225,27 +277,59 @@ async def update_user(
             user_data['email_verified'] = False
 
     if 'groups' in update_data:
-        _validate_property_write('groups', is_self, is_admin)
+        if await _update_groups(
+            user_data,
+            update_data,
+            property='groups',
+            is_self=is_self,
+            is_admin=is_admin,
+            existence_check_property=None,
+            groups_add_property='members',
+            groups_pull_properties=(
+                'members', 'email_allowed_forward_members', 'email_forward_members', 'email_postbox_access_members',
+            ),
+            members_pull_properties=(
+                'email_allowed_forward_members', 'email_forward_members', 'email_postbox_access_members',
+            ),
+        ):
+            reset_user_cache = True
 
-        new_groups = update_data['groups']
-        if await async_user_group_collection.count_documents({'_id': {'$in': new_groups}}) != len(new_groups):
-            raise HTTPException(404, "At least one group does not exist")
-        added_groups = list(set(new_groups).difference(user_data['groups']))
-        removed_groups = list(set(user_data['groups']).difference(new_groups))
-        user_data['groups'] = new_groups
-        if added_groups:
-            await async_user_group_collection.update_many(
-                {'_id': {'$in': added_groups}},
-                {'$addToSet': {'members': user_data['_id']}},
-            )
-            reset_user_cache = True
-        if removed_groups:
-            await async_user_group_collection.update_many(
-                {'_id': {'$in': removed_groups}},
-                {'$pull': {'members': user_data['_id']}},
-            )
-            reset_user_cache = True
-        del update_data['groups']
+    if 'email_allowed_forward_groups' in update_data:
+        await _update_groups(
+            user_data,
+            update_data,
+            property='email_allowed_forward_groups',
+            is_self=is_self,
+            is_admin=is_admin,
+            existence_check_property='groups',
+            groups_add_property='email_allowed_forward_members',
+            groups_pull_properties=('email_allowed_forward_members', 'email_forward_members'),
+            members_pull_properties=('email_forward_members',)
+        )
+
+    if 'email_forward_groups' in update_data:
+        await _update_groups(
+            user_data,
+            update_data,
+            property='email_forward_groups',
+            is_self=is_self,
+            is_admin=is_admin,
+            existence_check_property='email_allowed_forward_groups',
+            groups_add_property='email_forward_members',
+            groups_pull_properties=('email_forward_members',),
+        )
+
+    if 'email_postbox_access_groups' in update_data:
+        await _update_groups(
+            user_data,
+            update_data,
+            property='email_postbox_access_groups',
+            is_self=is_self,
+            is_admin=is_admin,
+            existence_check_property='groups',
+            groups_add_property='email_postbox_access_members',
+            groups_pull_properties=('email_postbox_access_members',),
+        )
 
     for key, value in update_data.items():
         _validate_property_write(key, is_self, is_admin)
@@ -263,6 +347,14 @@ async def update_user(
                 regex = get_regex(prop.format)
                 if not regex.fullmatch(value):
                     raise HTTPException(400, f"{repr(key)}={repr(value)} does not match pattern {repr(regex.pattern)}")
+            user_data[key] = value
+        elif prop.type == UserPropertyType.int:
+            if isinstance(value, float):
+                if not value.is_integer():
+                    raise HTTPException(400, f"{repr(key)}={repr(value)} is not an integer")
+                value = int(value)
+            if not isinstance(value, int):
+                raise HTTPException(400, f"{repr(key)}={repr(value)} is not an integer")
             user_data[key] = value
         elif prop.type == UserPropertyType.bool:
             if not isinstance(value, bool):

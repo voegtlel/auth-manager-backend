@@ -54,6 +54,7 @@ oauth2:
         type: bool
         title: "E-Mail Verified"
         can_edit: admin
+        visible: nobody
       phone_number:
         type: str
         title: "Phone"
@@ -194,12 +195,65 @@ oauth2:
         required: true
         can_edit: self
         can_read: nobody
+      storage_quota:
+        type: int
+        title: "Storage Quota"
+        can_edit: admin
+        can_read: self
+        format: '^[0-9]+$'
+        default: 100000000
+      has_email_alias:
+        type: bool
+        title: "Has E-Mail Alias"
+        can_edit: admin
+        can_read: self
+        default: False
+      forward_emails:
+        type: bool
+        title: "Forward E-Mails to Registered E-Mail"
+        can_edit: admin
+        can_read: self
+        default: True
+      has_postbox:
+        type: bool
+        title: "Has Postbox"
+        can_edit: admin
+        can_read: self
+        default: False
+      postbox_quota:
+        type: int
+        title: "E-Mail Postbox Quota"
+        can_edit: admin
+        can_read: self
+        format: '^[0-9]+$'
+        default: 100000000
       groups:
         type: groups
         title: "Groups"
         default: ['users']
         can_edit: admin
         can_read: self
+      email_allowed_forward_groups:
+        type: groups
+        title: "Allow Forward E-Mail"
+        default: []
+        can_edit: admin
+        can_read: self
+        visible: nobody
+      email_forward_groups:
+        type: groups
+        title: "Forward E-Mail"
+        default: []
+        can_edit: self
+        can_read: self
+        visible: nobody
+      email_postbox_access_groups:
+        type: groups
+        title: "Access Postbox"
+        default: []
+        can_edit: admin
+        can_read: self
+        visible: nobody
       notes:
         type: multistr
         title: "Admin Notes"
@@ -243,6 +297,10 @@ oauth2:
           # - 'address.region'
           # - 'address.postal_code'
           # - 'address.country'
+      storage_quota:
+        title: "Storage Quota"
+        properties:
+          - storage_quota
     password:
       schemes: ['argon2', 'bcrypt', 'pbkdf2_sha256']
       pwned_password_check: true
@@ -302,8 +360,16 @@ manager:
     - address.region
     - address.postal_code
     - address.country
+    - storage_quota
+    - has_email_alias
+    - forward_emails
+    - has_postbox
+    - postbox_quota
     - notes
     - groups
+    - email_allowed_forward_groups
+    - email_forward_groups
+    - email_postbox_access_groups
     - updated_at
     - card_id
 
