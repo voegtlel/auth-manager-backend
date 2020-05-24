@@ -3,6 +3,8 @@ mongo:
 
 oauth2:
   base_url: "http://127.0.0.1:8000"
+  mail_domain: "localhost.localdomain"
+  mail_api_key: "0123456789"
   keys:
     - key_file: key.private
       algorithm: RS256
@@ -33,6 +35,8 @@ oauth2:
 
   user:
     properties:
+      separator:
+        type: separator
       sub:
         type: str
         title: "User ID"
@@ -204,22 +208,24 @@ oauth2:
         default: 100000000
       has_email_alias:
         type: bool
-        title: "Has E-Mail Alias"
+        title: "Enable E-Mail Alias"
         can_edit: admin
         can_read: self
-        default: False
+        visible: nobody
+        default: false
       forward_emails:
         type: bool
-        title: "Forward E-Mails to Registered E-Mail"
+        title: "Forward E-Mails to registered E-Mail"
         can_edit: admin
         can_read: self
-        default: True
+        visible: nobody
+        default: true
       has_postbox:
         type: bool
-        title: "Has Postbox"
+        title: "Enable Postbox"
         can_edit: admin
         can_read: self
-        default: False
+        default: false
       postbox_quota:
         type: int
         title: "E-Mail Postbox Quota"
@@ -254,6 +260,21 @@ oauth2:
         can_edit: admin
         can_read: self
         visible: nobody
+      email_postbox_access_token:
+        type: token
+        title: "Postbox Access Token"
+        can_edit: only_self
+        can_read: only_self
+        visible: self
+      email_alias:
+        # This is generated once
+        type: str
+        title: "E-Mail Alias"
+        visible: nobody
+        can_edit: nobody
+        can_read: self
+        write_once: true
+        template: "{preferred_username.lower()}@{config.oauth2.mail_domain.lower()}"
       notes:
         type: multistr
         title: "Admin Notes"
@@ -361,10 +382,14 @@ manager:
     - address.postal_code
     - address.country
     - storage_quota
+    - separator
     - has_email_alias
+    - email_alias
     - forward_emails
     - has_postbox
     - postbox_quota
+    - email_postbox_access_token
+    - separator
     - notes
     - groups
     - email_allowed_forward_groups
@@ -377,12 +402,14 @@ manager:
     - picture
     - email
     - password
+    - separator
     - given_name
     - family_name
     - phone_number
-    - locale
+    - separator
     - birthdate
     - gender
+    - separator
     - address.street_address
     - address.postal_code
     - address.locality

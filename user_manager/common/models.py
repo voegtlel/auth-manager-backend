@@ -260,6 +260,8 @@ class User(BaseDocument):
         IndexModel([('email_verification_token', HASHED)]),
         IndexModel([('password_reset_token', HASHED)]),
         IndexModel([('groups', ASCENDING)]),
+        IndexModel([('email_postbox_access_token', ASCENDING)]),
+        IndexModel([('email_alias', ASCENDING)]),
     ]
     __collection_name__ = 'user'
 
@@ -294,3 +296,7 @@ class User(BaseDocument):
     email_allowed_forward_groups: List[str] = []
     email_forward_groups: List[str] = []
     email_postbox_access_groups: List[str] = []
+    email_postbox_access_token: Optional[str]
+    has_email_alias: Optional[bool]
+    forward_emails: Optional[bool]
+    email_alias: Optional[str]

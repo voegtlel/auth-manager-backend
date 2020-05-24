@@ -186,6 +186,13 @@ if __name__ == '__main__':
         default=os.environ.get('DB_TABLE_PREFIX', 'oc_'),
     )
 
+    parser.add_argument(
+        '--keep-ids',
+        action='store_true',
+        help="... or use environment variable KEEP_IDS='1'. If provided, keep the existing user ids.",
+        default=os.environ.get('KEEP_IDS', '0') == '1',
+    )
+
     args = parser.parse_args()
 
     if args.dbtype == 'mysql':
@@ -229,7 +236,10 @@ if __name__ == '__main__':
             username_counter += 1
         usernames.add(preferred_username)
 
-        new_id = generate_token(48)
+        if args.keep_ids:
+            new_id = user.uid
+        else:
+            new_id = generate_token(48)
         user_mapping[user.uid] = new_id
 
         users.append(
@@ -258,15 +268,16 @@ if __name__ == '__main__':
     groups = []
     for group in reader.read_groups():
         members = [user_mapping[member] for member in group.members]
-        if mongo.user_group_collection.count_documents({'_id': group.gid}, limit=1) != 0:
+        gid = group.gid.lower()
+        if mongo.user_group_collection.count_documents({'_id': gid}, limit=1) != 0:
             mongo.user_group_collection.update_one(
-                {'_id': group.gid},
+                {'_id': gid},
                 {'$addToSet': {'members': {'$each': members}}}
             )
-            print(f"Update group {group.gid}")
+            print(f"Update group {gid}")
         else:
             groups.append(UserGroup(
-                id=group.gid,
+                id=gid,
                 group_name=group.display_name,
                 notes="Imported from OC",
                 visible=True,
@@ -274,16 +285,6 @@ if __name__ == '__main__':
                 members=members,
             ).dict(exclude_none=True, by_alias=True))
             print("Create group", groups[-1])
-
-    #mongo.user_collection.insert_one(User(
-    #    id=generate_token(48),
-    #    email="admin@localhost",
-    #    active=False,
-    #    email_verified=True,
-    #    groups=['users', 'admin'],
-    #    updated_at=now,
-    #    registration_token=create_token(),
-    #).dict(exclude_none=True, by_alias=True))
 
     if users:
         mongo.user_collection.insert_many(users)

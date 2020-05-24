@@ -6,7 +6,7 @@ import gridfs
 from authlib.common.security import generate_token
 from authlib.oidc.core import UserInfo
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from fastapi.params import Header, Body, File
+from fastapi.params import Header, Body, File, Query
 
 from user_manager.common.config import config
 from user_manager.common.models import User
@@ -320,6 +320,7 @@ async def save_register_user(
     status_code=201,
 )
 async def create_user(
+        no_registration: bool = Query(False),
         create_data: Dict[str, Any] = Body(...),
         user: UserInfo = Depends(Authentication())
 ):
@@ -329,7 +330,7 @@ async def create_user(
         raise HTTPException(401)
 
     user_data = DotDict()
-    await _update_user(user_data, create_data, is_new=True, is_admin=True)
+    await _update_user(user_data, create_data, is_new=True, is_admin=True, no_registration=no_registration)
 
 
 @router.patch(

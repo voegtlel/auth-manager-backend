@@ -47,6 +47,7 @@ async def create_group(
     if 'admin' not in user['roles']:
         raise HTTPException(401)
     new_group = UserGroup.validate(group_data)
+    new_group.id = new_group.id.lower()
     if not new_group.enable_email:
         new_group.email_forward_members = []
         new_group.email_allowed_forward_members = []

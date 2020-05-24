@@ -82,11 +82,14 @@ class UserPropertyType(str, Enum):
     email = 'email'
     picture = 'picture'
     groups = 'groups'
+    token = 'token'
+    separator = 'separator'
 
 
 class AccessType(str, Enum):
     everybody = 'everybody'
     self = 'self'
+    only_self = 'only_self'
     admin = 'admin'
     nobody = 'nobody'
 
@@ -94,6 +97,7 @@ class AccessType(str, Enum):
         return (
             self == AccessType.everybody or
             (self == AccessType.self and (is_self or is_admin)) or
+            (self == AccessType.only_self and is_self) or
             (self == AccessType.admin and is_admin)
         )
 
@@ -200,6 +204,8 @@ class OAuth2LoginThrottler(BaseModel):
 
 class OAuth2Config(BaseModel):
     base_url: str
+    mail_domain: str
+    mail_api_key: str
 
     keys: List[KeyConfig] = ...
     issuer: str = ...
@@ -231,8 +237,8 @@ class ManagerConfig(BaseModel):
     name: str = ...
     oauth2: OAuth2ClientConfig
     mail: MailConfig = ...
-    view: List[str] = ...
-    registration: List[str] = ...
+    view: List[Optional[str]] = ...
+    registration: List[Optional[str]] = ...
     token_valid: ManagerTokenValid = ...
     list: List[str] = ...
 

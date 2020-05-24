@@ -162,6 +162,9 @@ async def _update_groups(
         groups_pull_properties: Sequence[str],
         members_pull_properties: Sequence[str] = (),
 ) -> bool:
+    if not isinstance(update_data[property], list) or \
+            not all(isinstance(group, str) for group in update_data[property]):
+        raise HTTPException(400, f"{repr(property)} must be a string")
     _validate_property_write(property, is_self, is_admin)
 
     reset_user_cache = False
@@ -210,6 +213,7 @@ async def update_user(
         is_registering: bool = False,
         is_admin: bool = False,
         is_self: bool = False,
+        no_registration: bool = False,
 ):
     if 'sub' in update_data or '_id' in update_data or 'picture' in update_data:
         raise HTTPException(400, f"Cannot modify 'sub', '_id' or 'picture'")
@@ -221,6 +225,8 @@ async def update_user(
         user_data['_id'] = generate_token(48)
 
     if 'password' in update_data:
+        if not isinstance(update_data['password'], str):
+            raise HTTPException(400, "'password' must be a string")
         _validate_property_write('password', is_self, is_admin)
         if not isinstance(update_data['password'], str):
             raise HTTPException(400, f"{repr('password')} is not a string")
@@ -244,6 +250,8 @@ async def update_user(
     if is_registering and update_data.get('email', user_data['email']) == user_data['email']:
         user_data['email_verified'] = True
     elif 'email' in update_data:
+        if not isinstance(update_data['email'], str):
+            raise HTTPException(400, "'email' must be a string")
         _validate_property_write('email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
@@ -255,7 +263,7 @@ async def update_user(
             locale = 'en_us'
         tz = _get_tz(update_data.get('zoneinfo', user_data.get('zoneinfo')))
         del update_data['email']
-        if is_new:
+        if is_new and not no_registration:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
             token_valid_until = int(time.time() + config.manager.token_valid.registration)
@@ -338,7 +346,7 @@ async def update_user(
             raise HTTPException(400, f"{repr(key)} can only be set once")
         if not value and not prop.required and key in user_data:
             del user_data[key]
-        if prop.type in (UserPropertyType.str, UserPropertyType.multistr):
+        if prop.type in (UserPropertyType.str, UserPropertyType.multistr, UserPropertyType.token):
             if not isinstance(value, str):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a string")
             if prop.template is not None:
@@ -410,7 +418,11 @@ async def update_user(
                     (not value.write_once or not user_data.get(key))
             ):
                 assert "'''" not in value.template, f"Invalid ''' in template: {value.template}"
-                user_data[key] = eval(f"f'''{value.template}'''", {'make_username': make_username}, user_data)
+                user_data[key] = eval(
+                    f"f'''{value.template}'''",
+                    {'make_username': make_username, 'config': config},
+                    user_data,
+                )
 
     user_data['updated_at'] = int(time.time())
 
