@@ -208,7 +208,7 @@ async def verify_email(
             'email_verification_token': ""
         },
     })
-    await async_client_user_cache_collection.delete_many(
+    await async_client_user_cache_collection.update_many(
         {'user_id': user_data['_id']},
         {'$set': {'last_modified': updated_at}},
     )
