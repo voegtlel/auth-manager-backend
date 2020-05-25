@@ -46,7 +46,7 @@
         $('#inputPassword').prop('disabled', true);
         evt.preventDefault();
         const query_params = window.location.href.slice(window.location.href.indexOf('?'))
-        console.log("Submit", query_params, body);
+        // console.log("Submit", query_params, body);
         $.ajax({
           url: '/authorize' + query_params,
           dataType: 'json',
@@ -76,7 +76,7 @@
             email: $('#inputResetEmail').val(),
         };
         evt.preventDefault();
-        console.log("Submit", body);
+        // console.log("Submit", body);
         $('#resetBtnLoading').css('display', 'inline-block');
         $('#resetBtn').prop('disabled', true);
         $('#inputResetEmail').prop('disabled', true);
