@@ -288,16 +288,6 @@ oauth2:
         visible: admin
         format: '^[0-9a-fA-F]*$'
     scopes:
-      email:
-        title: "E-Mail"
-        properties:
-          - email
-          - email_verified
-      phone:
-        title: "Phone"
-        properties:
-          - phone_number
-          - phone_number_verified
       profile:
         title: "Profile"
         properties:
@@ -318,6 +308,32 @@ oauth2:
           # - 'address.region'
           # - 'address.postal_code'
           # - 'address.country'
+      email:
+        title: "E-Mail"
+        properties:
+          - email
+          - email_verified
+      phone:
+        title: "Phone"
+        properties:
+          - phone_number
+          - phone_number_verified
+      gender:
+        title: "Gender"
+        properties:
+          - 'gender'
+      birthdate:
+        title: "Birthdate"
+        properties:
+          - 'birthdate'
+      address:
+        title: "Address"
+        properties:
+          - 'address.street_address'
+          - 'address.locality'
+          - 'address.region'
+          - 'address.postal_code'
+          - 'address.country'
       storage_quota:
         title: "Storage Quota"
         properties:
