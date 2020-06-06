@@ -14,7 +14,7 @@ router.include_router(client_router)
 app = FastAPI(openapi_prefix='/manager')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[config.manager.backend_cors_origin],
+    allow_origins=config.manager.backend_cors_origin,
     allow_credentials=True,
     allow_methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allow_headers=['*'],

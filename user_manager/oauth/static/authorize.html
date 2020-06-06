@@ -34,6 +34,28 @@
         $(target).show();
       }
 
+      function delayNext(delayUntil, completeCallback) {
+        const delayElement = $('#timeDelay');
+        if (delayUntil - new Date() > 0) {
+          $('#waitLogin').css('display', 'block');
+        }
+        function tick() {
+          const remaining = delayUntil - new Date();
+          if (remaining > 0) {
+            const remStr = remaining.toString();
+            const before = remStr.substr(0, remStr.length - 3) || '0';
+            const after = remStr.substr(remStr.length - 3, 2) || '00';
+            delayElement.text(before + '.' + after);
+            setTimeout(tick, 20);
+          } else {
+            $('#waitLogin').css('display', 'none');
+            delayElement.innerText = '';
+            completeCallback();
+          }
+        }
+        tick();
+      }
+
       function submitLogin(evt) {
         const body = {
             email: $('#inputEmail').val(),
@@ -63,8 +85,10 @@
             window.location.replace(result.redirect_url);
           })
           .fail(function(xhr) {
-            $('#loginBtnLoading').css('display', 'none');
-            $('#loginBtn').prop('disabled', false);
+            delayNext(new Date(xhr.getResponseHeader('X-Retry-After')), function() {
+              $('#loginBtnLoading').css('display', 'none');
+              $('#loginBtn').prop('disabled', false);
+            });
             $('#inputEmail').prop('disabled', false);
             $('#inputPassword').prop('disabled', false);
             handleError(xhr, '#loginError');
@@ -217,6 +241,7 @@
     </div>
     <div class="alert alert-danger" style="display:none" id="loginError"></div>
     <button class="btn btn-lg btn-primary btn-block" type="submit" id="loginBtn">Sign in <span class="spinner-border spinner-border-sm" style="display: none" id="loginBtnLoading" role="status" aria-hidden="true"></span></button>
+    <div class="alert alert-danger" style="display:none" id="waitLogin">Login failed, wait <span id="timeDelay"></span>sec before retry.</div>
     <button class="btn btn-link" type="button" id="gotoForgotPasswordBtn">Forgot Password?</button>
 </form>
 <form id="forgotPasswordForm" style="display:none">

@@ -177,8 +177,7 @@ async def authorize(
                 user_data = potential_user
                 break
     else:
-        await async_throttle_failure(request)
-        raise HTTPException(401)
+        raise HTTPException(401, headers={'X-Retry-After': await async_throttle_failure(request)})
 
     user = User.validate(user_data)
     if new_hash is not None:
@@ -325,7 +324,7 @@ async def post_issue_token(
     )
     allow_all_get_post_cors.augment(request, response)
     if isinstance(response, ErrorJSONResponse):
-        await async_throttle_failure(request)
+        response.headers['X-Retry-After'] = await async_throttle_failure(request)
     if (isinstance(response, JSONResponse) and not isinstance(response, ErrorJSONResponse) and
             str(oauth_request.user.last_modified) != session_state):
         response.set_cookie(
@@ -362,7 +361,7 @@ async def get_issue_token(
     )
     allow_all_get_post_cors.augment(request, response)
     if isinstance(response, ErrorJSONResponse):
-        await async_throttle_failure(request)
+        response.headers['X-Retry-After'] = await async_throttle_failure(request)
     if isinstance(response, JSONResponse) and str(oauth_request.user.last_modified) != session_state:
         response.set_cookie(
             key=COOKIE_KEY_STATE,

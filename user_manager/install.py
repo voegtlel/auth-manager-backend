@@ -13,6 +13,7 @@ if __name__ == '__main__':
     mongo.authorization_code_collection.drop()
     mongo.session_collection.drop()
     mongo.token_collection.drop()
+    mongo.ip_login_throttle_collection.drop()
 
     mongo.client_collection.drop()
     mongo.user_group_collection.drop()

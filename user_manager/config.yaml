@@ -327,7 +327,7 @@ oauth2:
       pwned_password_check: true
 
 manager:
-  backend_cors_origin: http://127.0.0.1:4200
+  backend_cors_origin: []
   backend_base_url: http://127.0.0.1:8000/manager
   frontend_base_url: http://127.0.0.1:4200
   secret_key: 'blablabla'
