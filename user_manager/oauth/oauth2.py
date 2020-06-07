@@ -17,7 +17,8 @@ from authlib.oauth2.rfc6749.grants import (
     RefreshTokenGrant as _RefreshTokenGrant,
     BaseGrant)
 from authlib.oauth2.rfc6749.util import scope_to_list
-from authlib.oauth2.rfc6750 import BearerTokenValidator as _BearerTokenValidator, BearerToken as _BearerToken
+from authlib.oauth2.rfc6750 import BearerTokenValidator as _BearerTokenValidator, BearerToken as _BearerToken, \
+    InsufficientScopeError
 from authlib.oauth2.rfc8414 import AuthorizationServerMetadata
 from authlib.oidc.core import UserInfo
 from authlib.oidc.core.grants import (
@@ -26,12 +27,15 @@ from authlib.oidc.core.grants import (
     OpenIDHybridGrant as _OpenIDHybridGrant,
 )
 from authlib.oidc.core.grants.util import is_openid_scope, generate_id_token
+from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response, JSONResponse
 
 from user_manager.common.config import config
 from user_manager.common.models import AuthorizationCode, Token, Client
 from user_manager.common.mongo import authorization_code_collection, token_collection, \
-    client_collection, client_user_cache_collection
+    client_collection, client_user_cache_collection, user_group_collection, async_token_collection, \
+    async_user_group_collection, async_client_collection
 from . import oauth2_key
 from .user_helper import UserWithRoles
 
@@ -161,6 +165,37 @@ class UserInfoMixin(object):
         user_data['roles'] = user.roles
         if 'picture' in user_data:
             user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
+        if 'groups' in user_data:
+            # Only include visible groups
+            user_data['groups'] = [
+                group['_id']
+                for group in user_group_collection.find(
+                    {'_id': {'$in': user_data['groups']}, 'visible': True},
+                    projection={'_id': 1}
+                )
+            ]
+        return UserInfo(**user_data)
+
+    async def async_generate_user_info(self, user: UserWithRoles, scope: str):
+        scope_list = scope_to_list(scope)
+        includes = set()
+        for scope in scope_list:
+            if scope not in ('openid', 'offline_access'):
+                includes.update(config.oauth2.user.scopes[scope].properties)
+        user_data = user.user.dict(include=includes, by_alias=True, exclude_none=True)
+        user_data['sub'] = user.user.id
+        user_data['roles'] = user.roles
+        if 'picture' in user_data:
+            user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
+        if 'groups' in user_data:
+            # Only include visible groups
+            user_data['groups'] = [
+                group['_id']
+                async for group in async_user_group_collection.find(
+                    {'_id': {'$in': user_data['groups']}, 'visible': True},
+                    projection={'_id': 1}
+                )
+            ]
         return UserInfo(**user_data)
 
 
@@ -248,6 +283,13 @@ def query_client(client_id: str):
     return Client.validate(client_data)
 
 
+async def async_query_client(client_id: str):
+    client_data = await async_client_collection.find_one({'_id': client_id})
+    if client_data is None:
+        return None
+    return Client.validate(client_data)
+
+
 def token_generator(*_):
     return generate_token(config.oauth2.token_length)
 
@@ -261,6 +303,8 @@ class AccessTokenGenerator(UserInfoMixin, JwtConfigMixin):
         jwt_config['auth_time'] = int(time.time())
 
         user_info = {'sub': user.user.id, 'roles': user.roles}
+        if 'groups' in scope_to_list(scope):
+            user_info['groups'] = user.user.groups
         return generate_id_token({}, user_info, code=generate_token(config.oauth2.access_token_length), **jwt_config)
 
 
@@ -332,13 +376,72 @@ class ResourceProtector(_ResourceProtector):
 
 
 class UserIntrospection(UserInfoMixin):
-    def create_response(self, request: TypedRequest) -> Response:
+    async def create_response(self, request: TypedRequest) -> Response:
         try:
             assert isinstance(request, OAuth2Request)
-            request.token = resource_protector.validate_request(None, request)
-            request.user = UserWithRoles.load(request.token.user_id, request.token.client_id)
-            user_info = self.generate_user_info(request.user, request.token.scope)
+            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+            if request.token is None:
+                raise HTTPException(403, "Invalid token")
+            request.user = await UserWithRoles.async_load(request.token.user_id, request.token.client_id)
+            user_info = await self.async_generate_user_info(request.user, request.token.scope)
             return JSONResponse(user_info)
+        except OAuth2Error as error:
+            return authorization.handle_error_response(request, error)
+
+
+class RequestOriginVerifier:
+    async def create_response(self, request: TypedRequest, origin: str) -> Optional[Response]:
+        try:
+            assert isinstance(request, OAuth2Request)
+            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+            if request.token is None:
+                raise HTTPException(403, "Invalid token")
+            request.client = await async_query_client(request.token.client_id)
+            if request.client is None:
+                raise HTTPException(403, "Invalid client in token")
+            if not request.client.check_redirect_uri(origin):
+                raise HTTPException(403, "Allowed redirect uri does not match request")
+            return None
+        except OAuth2Error as error:
+            return authorization.handle_error_response(request, error)
+
+
+class OtherUserInspection(UserInfoMixin):
+    async def create_response(self, request: TypedRequest, user_id: str) -> Response:
+        try:
+            assert isinstance(request, OAuth2Request)
+            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+            if request.token is None:
+                raise HTTPException(403, "Invalid token")
+            if 'users' not in scope_to_list(request.token.scope):
+                raise InsufficientScopeError('Missing "users" scope', request.uri)
+            user = await UserWithRoles.async_load(user_id, request.token.client_id)
+            if user is None:
+                raise HTTPException(404, "User not found")
+            user_info = await self.async_generate_user_info(user, 'users')
+            return JSONResponse(user_info)
+        except OAuth2Error as error:
+            return authorization.handle_error_response(request, error)
+
+
+class OtherUsersInspection(UserInfoMixin):
+    async def create_response(self, request: TypedRequest) -> Response:
+        try:
+            assert isinstance(request, OAuth2Request)
+            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+            if request.token is None:
+                raise HTTPException(403, "Invalid token")
+            if 'users' not in scope_to_list(request.token.scope):
+                raise InsufficientScopeError('Missing "users" scope', request.uri)
+            user_infos = []
+            async for user in UserWithRoles.async_load_all(request.token.client_id):
+                user_info = await self.async_generate_user_info(
+                    UserWithRoles(user=user, roles=[], last_modified=user.updated_at),
+                    'users'
+                )
+                del user_info['roles']
+                user_infos.append(user_info)
+            return JSONResponse(user_infos)
         except OAuth2Error as error:
             return authorization.handle_error_response(request, error)
 
@@ -350,12 +453,12 @@ class TypeHint(str, Enum):
 
 class RevocationEndpoint:
 
-    def create_response(self, raw_token: str, token_type_hint: Optional[TypeHint], request: TypedRequest) -> Response:
+    async def create_response(self, raw_token: str, token_type_hint: Optional[TypeHint], request: TypedRequest) -> Response:
         token_data = None
         if token_type_hint is None or token_type_hint == TypeHint.AccessToken:
-            token_data = token_collection.find_one({'_id': raw_token})
+            token_data = await async_token_collection.find_one({'_id': raw_token})
         if token_data is None and (token_type_hint is None or token_type_hint == TypeHint.RefreshToken):
-            token_data = token_collection.find_one({'refresh_token': raw_token})
+            token_data = await async_token_collection.find_one({'refresh_token': raw_token})
         if token_data is None:
             return Response()
         token = Token.validate(token_data)
@@ -364,8 +467,10 @@ class RevocationEndpoint:
                 request.data['client_id'] = token.client_id
             elif token.client_id != request.client_id:
                 raise InvalidClientError(state=request.state, status_code=401)
-            authorization.authenticate_client(request, ["none", "client_secret_basic", "client_secret_post"])
-            token_collection.update_one({'_id': token.access_token}, {'$set': {'revoked': True}})
+            await run_in_threadpool(
+                authorization.authenticate_client, request, ["none", "client_secret_basic", "client_secret_post"]
+            )
+            await async_token_collection.update_one({'_id': token.access_token}, {'$set': {'revoked': True}})
             return Response()
         except OAuth2Error as error:
             return authorization.handle_error_response(request, error)
@@ -376,3 +481,7 @@ resource_protector.register_token_validator(BearerTokenValidator())
 
 user_introspection = UserIntrospection()
 token_revocation = RevocationEndpoint()
+request_origin_verifier = RequestOriginVerifier()
+
+other_user_inspection = OtherUserInspection()
+other_users_inspection = OtherUsersInspection()

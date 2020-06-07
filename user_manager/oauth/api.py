@@ -22,7 +22,7 @@ from user_manager.common.mongo import async_user_collection, async_session_colle
 from user_manager.common.password_helper import verify_and_update
 from .cors import CORSHelper
 from .oauth2 import authorization, ErrorJSONResponse, ErrorRedirectResponse, RedirectResponse, user_introspection, \
-    token_revocation, TypeHint, TypedRequest
+    token_revocation, TypeHint, TypedRequest, request_origin_verifier, other_user_inspection, other_users_inspection
 from .oauth2_key import supported_alg_sig, jwks, JSONWebKeySet
 from .session import async_validate_session
 from .throttle import async_throttle_failure, async_throttle
@@ -394,8 +394,7 @@ async def post_revoke_token(
         token_type_hint: Optional[TypeHint] = Form(None),
 ):
     """Revokes a token."""
-    response: Response = await run_in_threadpool(
-        token_revocation.create_response,
+    response: Response = await token_revocation.create_response(
         token,
         token_type_hint,
         request=await oauth2_request(request),
@@ -419,10 +418,12 @@ async def get_userinfo(
 ):
     """Introspect self."""
     oauth_request = await oauth2_request(request)
-    response: Response = await run_in_threadpool(
-        user_introspection.create_response,
-        oauth_request,
-    )
+    origin = request.headers.get("origin")
+    if origin is not None:
+        origin_response = await request_origin_verifier.create_response(oauth_request, origin)
+        if origin_response is not None:
+            return origin_response
+    response = await user_introspection.create_response(oauth_request)
     allow_all_get_cors.augment(request, response)
 
     if str(oauth_request.user.last_modified) != session_state:
@@ -433,6 +434,55 @@ async def get_userinfo(
             secure=os.environ.get('AUTHLIB_INSECURE_TRANSPORT') != 'true',
         )
 
+    return response
+
+
+@router.options('/profiles/{user_id}')
+async def get_profile_options(request: Request):
+    return allow_all_get_cors.options(request)
+
+
+@router.get(
+    '/profiles/{user_id}',
+    response_model=Dict[str, Any],
+)
+async def get_profile(
+        request: Request,
+        user_id: str,
+):
+    """Inspect other user's profile."""
+    oauth_request = await oauth2_request(request)
+    origin = request.headers.get("origin")
+    if origin is not None:
+        origin_response = await request_origin_verifier.create_response(oauth_request, origin)
+        if origin_response is not None:
+            return origin_response
+    response = await other_user_inspection.create_response(oauth_request, user_id)
+    allow_all_get_cors.augment(request, response)
+    return response
+
+
+@router.options('/profiles')
+async def get_profiles_options(request: Request):
+    return allow_all_get_cors.options(request)
+
+
+@router.get(
+    '/profiles',
+    response_model=Dict[str, Any],
+)
+async def get_profiles(
+        request: Request,
+):
+    """List other user's profiles."""
+    oauth_request = await oauth2_request(request)
+    origin = request.headers.get("origin")
+    if origin is not None:
+        origin_response = await request_origin_verifier.create_response(oauth_request, origin)
+        if origin_response is not None:
+            return origin_response
+    response = await other_users_inspection.create_response(oauth_request)
+    allow_all_get_cors.augment(request, response)
     return response
 
 

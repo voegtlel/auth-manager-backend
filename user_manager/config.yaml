@@ -322,6 +322,19 @@ oauth2:
         title: "Gender"
         properties:
           - 'gender'
+      groups:
+        title: "Groups"
+        properties:
+          - 'groups'
+      users:
+        title: "Other Users Profile"
+        properties:
+          - name
+          - family_name
+          - given_name
+          - picture
+          - email
+          - phone_number
       birthdate:
         title: "Birthdate"
         properties:

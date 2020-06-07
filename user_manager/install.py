@@ -33,13 +33,13 @@ if __name__ == '__main__':
     ).dict(exclude_none=True, by_alias=True))
     mongo.user_group_collection.insert_one(UserGroup(
         id='users',
-        visible=True,
+        visible=False,
         group_name="All Users",
         members=[admin_id],
     ).dict(exclude_none=True, by_alias=True))
     mongo.user_group_collection.insert_one(UserGroup(
         id='admin',
-        visible=True,
+        visible=False,
         group_name="Admins",
         members=[admin_id],
     ).dict(exclude_none=True, by_alias=True))

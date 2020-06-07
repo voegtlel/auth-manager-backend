@@ -1,10 +1,10 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, AsyncIterator
 
 from authlib.common.security import generate_token
 from fastapi import HTTPException
 from pydantic.main import BaseModel
 
-from user_manager.common.models import UserGroup, User, ClientUserCache
+from user_manager.common.models import UserGroup, User, ClientUserCache, Client
 from user_manager.common.mongo import user_group_collection, async_user_group_collection, client_collection, \
     client_user_cache_collection, async_client_collection, async_client_user_cache_collection, user_collection, \
     async_user_collection
@@ -186,3 +186,18 @@ class UserWithRoles(BaseModel):
         if group_data is None:
             return None
         return UserWithRoles(user=user, roles=group_data['roles'], last_modified=group_data['last_modified'])
+
+    @staticmethod
+    async def async_load_all(client_id: str) -> AsyncIterator[User]:
+        client = await async_client_collection.find_one({'_id': client_id}, {'_id': 0, 'access_groups': 1})
+        if client is None:
+            raise HTTPException(400, "Invalid client")
+
+        client_groups = [access_group for access_group in client['access_groups']]
+        client_user_groups = [access_group['group'] for access_group in client_groups]
+
+        all_client_group_maps = await _async_resolve_groups(client_user_groups)
+        all_client_groups = set(group for groups in all_client_group_maps.values() for group in groups)
+
+        async for user_data in async_user_collection.find({'groups': {'$in': all_client_groups}}):
+            yield User.validate(user_data)
