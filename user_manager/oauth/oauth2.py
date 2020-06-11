@@ -49,7 +49,7 @@ class TypedRequest(OAuth2Request):
 class RedirectResponse(Response):
     def to_json_response(self) -> JSONResponse:
         return JSONResponse(
-            content={'redirect_url': self.headers['Location']},
+            content={'redirect_uri': self.headers['Location']},
             status_code=200,
             headers=dict(default_json_headers),
         )
@@ -62,7 +62,7 @@ class ErrorJSONResponse(JSONResponse):
 class ErrorRedirectResponse(RedirectResponse):
     def to_json_response(self) -> JSONResponse:
         return ErrorJSONResponse(
-            content={'redirect_url': self.headers['Location']},
+            content={'redirect_uri': self.headers['Location']},
             status_code=401,
             headers=dict(default_json_headers),
         )

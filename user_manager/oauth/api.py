@@ -148,7 +148,7 @@ class AuthCredentials(BaseModel):
 
 
 class RedirectResult(BaseModel):
-    redirect_url: str
+    redirect_uri: str
 
 
 @router.post(
@@ -200,7 +200,7 @@ async def authorize(
         return_url = urllib.parse.quote_plus(str(request.url))
         return JSONResponse(
             content={
-                'redirect_url': f"{config.manager.frontend_base_url}/register/{registration_token}"
+                'redirect_uri': f"{config.manager.frontend_base_url}/register/{registration_token}"
                                 f"?return_url={return_url}"
             },
             status_code=200,

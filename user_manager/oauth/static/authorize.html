@@ -20,8 +20,8 @@
           //let result = $.parseJSON(xhr.responseText);
           let result = xhr.responseJSON;
           console.error(result);
-          if (result.redirect_url) {
-            window.location.replace(result.redirect_url);
+          if (result.redirect_uri) {
+            window.location.replace(result.redirect_uri);
             return;
           }
           if (result.detail) {
@@ -82,7 +82,7 @@
             $('#loginBtn').prop('disabled', false);
             $('#inputEmail').prop('disabled', false);
             $('#inputPassword').prop('disabled', false);
-            window.location.replace(result.redirect_url);
+            window.location.replace(result.redirect_uri);
           })
           .fail(function(xhr) {
             delayNext(new Date(xhr.getResponseHeader('X-Retry-After')), function() {
