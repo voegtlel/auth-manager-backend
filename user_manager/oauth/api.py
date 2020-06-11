@@ -5,7 +5,7 @@ from typing import Optional, Any, Dict, List, cast, Tuple
 
 import gridfs
 from authlib.common.security import generate_token
-from authlib.common.urls import add_params_to_uri
+from authlib.common.urls import add_params_to_uri, url_decode, url_encode
 from authlib.consts import default_json_headers
 from authlib.oauth2 import OAuth2Request
 from fastapi import HTTPException, APIRouter
@@ -197,7 +197,11 @@ async def authorize(
                 {'_id': user.id},
                 {'$set': {'registration_token': registration_token}},
             )
-        return_url = urllib.parse.quote_plus(str(request.url))
+        args = dict(url_decode(request.url.query))
+        args.update((await request.form()) or {})
+
+        #: dict of query and body params
+        return_url = urllib.parse.quote_plus(config.oauth2.base_url + '/authorize?' + url_encode(args.items()))
         return JSONResponse(
             content={
                 'redirect_uri': f"{config.manager.frontend_base_url}/register/{registration_token}"
