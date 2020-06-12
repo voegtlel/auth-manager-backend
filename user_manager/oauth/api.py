@@ -177,7 +177,9 @@ async def authorize(
                 user_data = potential_user
                 break
     else:
-        raise HTTPException(401, headers={'X-Retry-After': await async_throttle_failure(request)})
+        raise HTTPException(
+            401, "Invalid E-Mail or Password", headers={'X-Retry-After': await async_throttle_failure(request)}
+        )
 
     user = User.validate(user_data)
     if new_hash is not None:

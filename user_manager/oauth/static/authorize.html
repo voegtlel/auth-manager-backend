@@ -16,19 +16,26 @@
     <script language="javascript" type="text/javascript">
       function handleError(xhr, target) {
         let errorText = xhr.statusText;
-        try {
-          //let result = $.parseJSON(xhr.responseText);
-          let result = xhr.responseJSON;
-          console.error(result);
-          if (result.redirect_uri) {
-            window.location.replace(result.redirect_uri);
-            return;
+        if (xhr.status === 0) {
+          errorText = 'Server not reachable. Please contact your administrator.';
+        } else {
+          try {
+            let result = xhr.responseJSON;
+            if (result != null) {
+              console.error(result);
+              if (result.redirect_uri) {
+                window.location.replace(result.redirect_uri);
+                return;
+              }
+              if (result.detail) {
+                errorText = result.detail;
+              }
+            } else if (xhr.responseText) {
+              errorText = xhr.responseText;
+            }
+          } catch(e) {
+            console.error(e, xhr);
           }
-          if (result.detail) {
-            errorText = result.detail;
-          }
-        } catch(e) {
-          console.error(e, xhr);
         }
         $(target).text(errorText);
         $(target).show();

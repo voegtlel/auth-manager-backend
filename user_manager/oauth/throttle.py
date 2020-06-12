@@ -1,7 +1,10 @@
 import asyncio
+import ipaddress
 import math
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate, format_datetime
+from ipaddress import IPv4Address, IPv6Address, IPv6Network
+from typing import Union, Optional
 
 from starlette.requests import Request
 
@@ -14,23 +17,43 @@ _max_throttle_count = int(
 )
 
 
+def normalize_source(request: Request) -> Optional[str]:
+    try:
+        ip_address: Union[IPv4Address, IPv6Address, IPv6Network] = ipaddress.ip_address(request.client.host)
+    except ValueError as e:
+        print(f"WARNING: Did not get IPv4/IPv6 from source: {e}, maybe configured incorrectly")
+        return None
+    if ip_address.is_private and config.oauth2.login_throttler.skip_private:
+        return None
+    if isinstance(ip_address, IPv6Address):
+        masked_ip_net = int(ip_address) & 0xffffffffffffffff0000000000000000
+        ip_address = IPv6Network(str(IPv6Address(masked_ip_net)) + '/64')
+    return str(ip_address)
+
+
 async def async_throttle(request: Request):
     if not config.oauth2.login_throttler.enable:
-        return 0
-    throttle_data = await async_ip_login_throttle_collection.find_one({'_id': request.client.host})
+        return
+    ip_address = normalize_source(request)
+    if ip_address is None:
+        return
+    throttle_data = await async_ip_login_throttle_collection.find_one({'_id': ip_address})
     if throttle_data is None:
         return 0
     throttle = IpLoginThrottle.validate(throttle_data)
     delay = (throttle.next_retry - datetime.utcnow()).total_seconds()
     if delay > 0:
-        print(f"Throttle check from {request.client.host}: {delay}sec at {throttle.next_retry}")
+        print(f"Throttle check from {request.client.host} (from {ip_address}): {delay}sec at {throttle.next_retry}")
         await asyncio.sleep(delay)
 
 
 async def async_throttle_failure(request: Request) -> str:
     if not config.oauth2.login_throttler.enable:
         return formatdate(usegmt=True)
-    throttle_data = await async_ip_login_throttle_collection.find_one({'_id': request.client.host})
+    ip_address = normalize_source(request)
+    if ip_address is None:
+        return formatdate(usegmt=True)
+    throttle_data = await async_ip_login_throttle_collection.find_one({'_id': ip_address})
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if throttle_data is None:
         delay = config.oauth2.login_throttler.base_delay
@@ -54,6 +77,6 @@ async def async_throttle_failure(request: Request) -> str:
         await async_ip_login_throttle_collection.replace_one(
             {'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True)
         )
-    print(f"Throttling {throttle.ip} for {delay}sec until {throttle.next_retry}")
+    print(f"Throttling {throttle.ip} (from {ip_address}) for {delay}sec until {throttle.next_retry}")
 
     return format_datetime(throttle.next_retry, usegmt=True)
