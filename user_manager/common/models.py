@@ -249,6 +249,12 @@ class UserGroup(BaseDocument):
     email_postbox_access_members: List[str] = []
 
 
+class UserPasswordAccessToken(BaseSubDocument):
+    id: str
+    description: str
+    token: str
+
+
 class User(BaseDocument):
 
     class Config:
@@ -256,12 +262,13 @@ class User(BaseDocument):
 
     __indexes__ = [
         IndexModel([('email', ASCENDING)], unique=True),
+        IndexModel([('card_id', ASCENDING)], unique=True, sparse=True),
         IndexModel([('preferred_username', ASCENDING)], unique=True),
         IndexModel([('registration_token', HASHED)]),
         IndexModel([('email_verification_token', HASHED)]),
         IndexModel([('password_reset_token', HASHED)]),
         IndexModel([('groups', ASCENDING)]),
-        IndexModel([('email_postbox_access_token', ASCENDING)]),
+        IndexModel([('access_tokens.token', ASCENDING)]),
         IndexModel([('email_alias', ASCENDING)]),
     ]
     __collection_name__ = 'user'
@@ -292,6 +299,8 @@ class User(BaseDocument):
     locale: Optional[str]
     zoneinfo: Optional[str]
     updated_at: Optional[int]
+
+    access_tokens: List[UserPasswordAccessToken] = []
 
     groups: List[str] = []
     email_allowed_forward_groups: List[str] = []

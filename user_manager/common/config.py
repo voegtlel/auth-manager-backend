@@ -83,6 +83,7 @@ class UserPropertyType(str, Enum):
     picture = 'picture'
     groups = 'groups'
     token = 'token'
+    access_token = 'access_token'
     separator = 'separator'
 
 
@@ -206,10 +207,12 @@ class OAuth2LoginThrottler(BaseModel):
 class OAuth2Config(BaseModel):
     base_url: str
     mail_domain: str
-    mail_api_key: str
 
     keys: List[KeyConfig] = ...
     issuer: str = ...
+
+    card_authentication_api_key: Optional[str] = None
+    card_authentication_client_id: Optional[str] = None
 
     token_expiration: OAuth2TokenExpiration = OAuth2TokenExpiration()
 

@@ -4,7 +4,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from email.utils import formatdate, format_datetime
 from ipaddress import IPv4Address, IPv6Address, IPv6Network
-from typing import Union, Optional
+from typing import Union, Optional, Tuple
 
 from starlette.requests import Request
 
@@ -17,9 +17,9 @@ _max_throttle_count = int(
 )
 
 
-def normalize_source(request: Request) -> Optional[str]:
+def normalize_ip_address(ip_address: str) -> Optional[str]:
     try:
-        ip_address: Union[IPv4Address, IPv6Address, IPv6Network] = ipaddress.ip_address(request.client.host)
+        ip_address: Union[IPv4Address, IPv6Address, IPv6Network] = ipaddress.ip_address(ip_address)
     except ValueError as e:
         print(f"WARNING: Did not get IPv4/IPv6 from source: {e}, maybe configured incorrectly")
         return None
@@ -31,34 +31,52 @@ def normalize_source(request: Request) -> Optional[str]:
     return str(ip_address)
 
 
-async def async_throttle(request: Request):
+async def _async_throttle_delay(ip_address_str: str) -> Tuple[float, Optional[datetime]]:
     if not config.oauth2.login_throttler.enable:
-        return
-    ip_address = normalize_source(request)
+        return 0, None
+    ip_address = normalize_ip_address(ip_address_str)
     if ip_address is None:
-        return
+        return 0, None
     throttle_data = await async_ip_login_throttle_collection.find_one({'_id': ip_address})
     if throttle_data is None:
-        return 0
+        return 0, None
     throttle = IpLoginThrottle.validate(throttle_data)
     delay = (throttle.next_retry - datetime.utcnow()).total_seconds()
     if delay > 0:
-        print(f"Throttle check from {request.client.host} (from {ip_address}): {delay}sec at {throttle.next_retry}")
+        print(f"Throttle check from {ip_address_str} (from {ip_address}): {delay}sec at {throttle.next_retry}")
+        return delay, throttle.next_retry
+    return 0, None
+
+
+async def async_throttle_delay(ip_address_str: str) -> Tuple[Optional[str], Optional[str]]:
+    delay, next_retry = _async_throttle_delay(ip_address_str)
+    if delay > 0:
+        return str(int(delay + 0.999)), format_datetime(next_retry, usegmt=True)
+    return None, None
+
+
+async def async_throttle(request: Request) -> Tuple[Optional[str], Optional[str]]:
+    return await async_throttle_delay(request.client.host)
+
+
+async def async_throttle_sleep(request: Request):
+    delay, _ = await _async_throttle_delay(request.client.host)
+    if delay > 0:
         await asyncio.sleep(delay)
 
 
-async def async_throttle_failure(request: Request) -> str:
+async def async_throttle_failure(ip_address_str: str) -> Tuple[str, str]:
     if not config.oauth2.login_throttler.enable:
-        return formatdate(usegmt=True)
-    ip_address = normalize_source(request)
+        return formatdate(usegmt=True), "0"
+    ip_address = normalize_ip_address(ip_address_str)
     if ip_address is None:
-        return formatdate(usegmt=True)
+        return formatdate(usegmt=True), "0"
     throttle_data = await async_ip_login_throttle_collection.find_one({'_id': ip_address})
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if throttle_data is None:
         delay = config.oauth2.login_throttler.base_delay
         throttle = IpLoginThrottle(
-            ip=request.client.host,
+            ip=ip_address,
             retries=1,
             last_retry=now,
             next_retry=now + timedelta(seconds=delay),
@@ -77,6 +95,9 @@ async def async_throttle_failure(request: Request) -> str:
         await async_ip_login_throttle_collection.replace_one(
             {'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True)
         )
-    print(f"Throttling {throttle.ip} (from {ip_address}) for {delay}sec until {throttle.next_retry}")
+    print(f"Throttling {throttle.ip} (from {ip_address_str}) for {delay}sec until {throttle.next_retry}")
+    return format_datetime(throttle.next_retry, usegmt=True), str(int(delay + 0.999))
 
-    return format_datetime(throttle.next_retry, usegmt=True)
+
+async def async_throttle_failure_request(request: Request) -> Tuple[str, str]:
+    return await async_throttle_failure(request.client.host)

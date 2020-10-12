@@ -1,8 +1,8 @@
-import time
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple, Dict, Any, Union
 
+import time
 from authlib.common.security import generate_token
 from authlib.consts import default_json_headers
 from authlib.oauth2 import (
@@ -10,12 +10,17 @@ from authlib.oauth2 import (
     AuthorizationServer as _AuthorizationServer,
     ResourceProtector as _ResourceProtector,
     OAuth2Error,
-    HttpRequest)
+    HttpRequest,
+)
 from authlib.oauth2.rfc6749 import InvalidClientError
 from authlib.oauth2.rfc6749.grants import (
     AuthorizationCodeGrant as _AuthorizationCodeGrant,
     RefreshTokenGrant as _RefreshTokenGrant,
-    BaseGrant)
+    BaseGrant,
+)
+from authlib.oauth2.rfc6749.grants import (
+    ResourceOwnerPasswordCredentialsGrant as _ResourceOwnerPasswordCredentialsGrant,
+)
 from authlib.oauth2.rfc6749.util import scope_to_list
 from authlib.oauth2.rfc6750 import BearerTokenValidator as _BearerTokenValidator, BearerToken as _BearerToken, \
     InsufficientScopeError
@@ -32,10 +37,10 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response, JSONResponse
 
 from user_manager.common.config import config
-from user_manager.common.models import AuthorizationCode, Token, Client
+from user_manager.common.models import AuthorizationCode, Token, Client, User
 from user_manager.common.mongo import authorization_code_collection, token_collection, \
     client_collection, client_user_cache_collection, user_group_collection, async_token_collection, \
-    async_user_group_collection, async_client_collection
+    async_user_group_collection, async_client_collection, user_collection
 from . import oauth2_key
 from .user_helper import UserWithRoles
 
@@ -221,6 +226,21 @@ class AuthorizationCodeGrant(_AuthorizationCodeGrant):
         return UserWithRoles.load(authorization_code.user_id, authorization_code.client_id)
 
 
+class ResourceOwnerPasswordCredentialsGrant(_ResourceOwnerPasswordCredentialsGrant):
+
+    def authenticate_token_endpoint_client(self):
+        # Must override this to set the client in the request, to make it available to authenticate_user
+        client = super(self).authenticate_token_endpoint_client()
+        self.request.client = client
+        return client
+
+    def authenticate_user(self, username: str, password: str):
+        user_data = user_collection.find_one({'email': username, 'access_tokens.token': password, 'active': True})
+        if user_data is None:
+            return None
+        return UserWithRoles.load_groups(User.validate(user_data), self.client.id)
+
+
 class OpenIDCode(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDCode):
     jwt_token_expiration = config.oauth2.token_expiration.authorization_code
 
@@ -347,6 +367,7 @@ authorization.register_grant(AuthorizationCodeGrant, [OpenIDCode(require_nonce=T
 authorization.register_grant(OpenIDImplicitGrant)
 authorization.register_grant(OpenIDHybridGrant)
 authorization.register_grant(RefreshTokenGrant, [OpenIDCode(require_nonce=True), OpenIDSessionState()])
+authorization.register_grant(ResourceOwnerPasswordCredentialsGrant)
 
 
 class BearerTokenValidator(_BearerTokenValidator):
@@ -453,7 +474,9 @@ class TypeHint(str, Enum):
 
 class RevocationEndpoint:
 
-    async def create_response(self, raw_token: str, token_type_hint: Optional[TypeHint], request: TypedRequest) -> Response:
+    async def create_response(
+            self, raw_token: str, token_type_hint: Optional[TypeHint], request: TypedRequest
+    ) -> Response:
         token_data = None
         if token_type_hint is None or token_type_hint == TypeHint.AccessToken:
             token_data = await async_token_collection.find_one({'_id': raw_token})

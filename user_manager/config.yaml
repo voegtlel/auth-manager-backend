@@ -13,6 +13,9 @@ oauth2:
       id: 'RS256'
   issuer: "http://127.0.0.1:8000"
 
+  card_authentication_api_key:
+  card_authentication_client_id:
+
   token_length: 48
   token_expiration:
     authorization_code: 86400
@@ -240,6 +243,12 @@ oauth2:
         default: ['users']
         can_edit: admin
         can_read: self
+      access_tokens:
+        type: access_tokens
+        title: "Access Tokens"
+        default: []
+        can_edit: admin
+        can_read: admin
       email_allowed_forward_groups:
         type: groups
         title: "Allow Forward E-Mail"
@@ -261,12 +270,6 @@ oauth2:
         can_edit: admin
         can_read: self
         visible: nobody
-      email_postbox_access_token:
-        type: token
-        title: "Postbox Access Token"
-        can_edit: only_self
-        can_read: only_self
-        visible: self
       email_alias:
         # This is generated once
         type: str
@@ -372,16 +375,6 @@ manager:
   oauth2:
     server_metadata_url: 'http://127.0.0.1:8000/.well-known/openid-configuration'
     client_id: 'manager'
-  mail:
-    host: localhost
-    sender: "admin@localhost"
-    #port: 25
-    #ssl: false
-    #starttls: false
-    #keyfile: null
-    #certfile: null
-    #user: ""
-    #password: ""
 
   list:
     - email
@@ -418,10 +411,10 @@ manager:
     - forward_emails
     - has_postbox
     - postbox_quota
-    - email_postbox_access_token
     - separator
     - notes
     - groups
+    - access_tokens
     - email_allowed_forward_groups
     - email_forward_groups
     - email_postbox_access_groups

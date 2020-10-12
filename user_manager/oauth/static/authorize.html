@@ -41,6 +41,16 @@
         $(target).show();
       }
 
+      function parseQueryString() {
+        var params = {};
+        var rawParams = location.search.substr(1).split('&');
+        for (var i = 0; i < rawParams.length; i++) {
+          var param = rawParams[i].split('=');
+          params[param[0]] = decodeURIComponent(param[1]);
+        }
+        return params;
+      }
+
       function delayNext(delayUntil, completeCallback) {
         const delayElement = $('#timeDelay');
         if (delayUntil - new Date() > 0) {
@@ -74,10 +84,9 @@
         $('#inputEmail').prop('disabled', true);
         $('#inputPassword').prop('disabled', true);
         evt.preventDefault();
-        const query_params = window.location.href.slice(window.location.href.indexOf('?'))
         // console.log("Submit", query_params, body);
         $.ajax({
-          url: '/authorize' + query_params,
+          url: '/authorize' + window.location.search,
           dataType: 'json',
           data: JSON.stringify(body),
           method: 'POST',
@@ -136,7 +145,7 @@
       }
 
       function showForgotPassword(evt) {
-        console.log("showForgotPassword", evt);
+        //console.log("showForgotPassword", evt);
         evt.preventDefault();
         $('#loginForm').css('display', 'none');
         $('#resetDone').css('display', 'none');
@@ -151,12 +160,28 @@
       }
 
       $(document).ready(function() {
-        console.log("ready");
         $('#loginForm').submit(submitLogin);
         $('#forgotPasswordForm').submit(submitResetPassword);
         $('#gotoForgotPasswordBtn').click(showForgotPassword);
         $('#gotoLoginBtn').click(showLogin);
         $('#gotoLoginBtn2').click(showLogin);
+
+        let query = parseQueryString();
+        if (query.timeout && query.timeout_uri) {
+          function returnTimeout() { window.location.replace(query.timeout_uri); }
+          let currentTimeout = null;
+          function startTimeout() {
+            if (currentTimeout != null) {
+              clearTimeout(currentTimeout);
+            }
+            currentTimeout = setTimeout(returnTimeout, Math.round(parseFloat(query.timeout) * 1000));
+          }
+          startTimeout();
+          // Restart timer on mouse / key interaction
+          $(document).mousemove(startTimeout);
+          $(document).keypress(startTimeout);
+        }
+        console.log("ready");
       });
 
     </script>

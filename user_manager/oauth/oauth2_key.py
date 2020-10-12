@@ -68,7 +68,7 @@ def load_key(key_config: KeyConfig) -> KeyData:
             private_key = key_config.key
             public_key = private_key
         elif key_config.key.startswith('-----BEGIN'):
-            private_key = load_pem_private_key(key_config.key, key_config.password, default_backend())
+            private_key = load_pem_private_key(key_config.key.encode(), key_config.password, default_backend())
             public_key = private_key.public_key()
         else:
             raise ValueError("key invalid")

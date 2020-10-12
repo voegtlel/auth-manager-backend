@@ -6,19 +6,27 @@ from typing import Dict, Any, Optional, Sequence, List
 
 from authlib.common.security import generate_token
 from fastapi import HTTPException
+from pydantic import BaseModel
 from pydantic.datetime_parse import parse_datetime, parse_date
 from pyisemail import is_email
 from pytz import UTC, timezone, UnknownTimeZoneError
 from unidecode import unidecode
 
 from user_manager.common.config import config, UserPropertyType
-from user_manager.common.models import User
+from user_manager.common.models import User, UserPasswordAccessToken
 from user_manager.common.mongo import async_user_collection, \
     async_client_user_cache_collection, async_authorization_code_collection, async_session_collection, \
     async_token_collection, async_user_group_collection, user_collection
 from user_manager.common.password_helper import verify_and_update, create_password, PasswordLeakedException
 from user_manager.manager.helper import get_regex, DotDict
 from user_manager.manager.mailer import mailer
+
+
+class ValidateAccessToken(BaseModel):
+    id: Optional[str] = None
+    description: str
+    token: Optional[str] = None
+
 
 replace_dot_re = re.compile(r'\b[\s]+\b')
 remove_re = re.compile(r'[^a-z0-9.-]')
@@ -228,8 +236,6 @@ async def update_user(
         if not isinstance(update_data['password'], str):
             raise HTTPException(400, "'password' must be a string")
         _validate_property_write('password', is_self, is_admin)
-        if not isinstance(update_data['password'], str):
-            raise HTTPException(400, f"{repr('password')} is not a string")
         if is_self and not is_registering and user_data.get('password') is not None:
             if 'old_password' not in update_data:
                 raise HTTPException(400, f"Need {repr('old_password')} for setting password")
@@ -283,6 +289,40 @@ async def update_user(
         else:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
+
+    if 'access_tokens' in update_data:
+        if not isinstance(update_data['access_tokens'], list):
+            raise HTTPException(400, "'access_tokens' must be a list")
+        try:
+            access_tokens = [ValidateAccessToken.validate(val) for val in update_data['access_tokens']]
+        except ValueError as err:
+            raise HTTPException(400, str(err))
+        _validate_property_write('access_tokens', is_self, is_admin)
+        existing_access_tokens = [
+            UserPasswordAccessToken.validate(access_token)
+            for access_token in user_data['access_tokens']
+        ]
+        existing_access_tokens_by_id = {
+            existing_access_token.id: existing_access_token
+            for existing_access_token in existing_access_tokens
+        }
+        new_access_tokens = []
+        for access_token in access_tokens:
+            if access_token.id is not None:
+                store_token = existing_access_tokens_by_id.get(access_token.id)
+                if store_token is None:
+                    raise HTTPException(400, f"Invalid token ID {access_token.id}")
+                store_token.description = access_token.description
+                if access_token.token is not None:
+                    store_token.token = access_token.token
+            else:
+                store_token = UserPasswordAccessToken(
+                    id=generate_token(24),
+                    description=access_token.description,
+                    token=access_token.token,
+                )
+            new_access_tokens.append(store_token)
+        user_data['access_tokens'] = [access_token.dict() for access_token in new_access_tokens]
 
     if 'groups' in update_data:
         if await _update_groups(

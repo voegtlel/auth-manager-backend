@@ -136,3 +136,27 @@ class CORSHelper:
             return PlainTextResponse(failure_text, status_code=400, headers=headers)
 
         return PlainTextResponse("OK", status_code=200, headers=headers)
+
+
+allow_all_get_cors = CORSHelper(
+    allow_origins='*',
+    allow_methods=('GET',),
+    allow_headers=('authorization',),
+    allow_credentials=True,
+)
+allow_all_get_post_cors = CORSHelper(
+    allow_origins='*',
+    allow_methods=('GET', 'POST'),
+    allow_headers=('authorization',),
+    allow_credentials=True,
+)
+allow_all_post_cors = CORSHelper(
+    allow_origins='*',
+    allow_methods=('POST',),
+    allow_headers=('authorization',),
+    allow_credentials=True,
+)
+allow_all_get_head_cors = CORSHelper(
+    allow_origins='*',
+    allow_methods=('GET', 'HEAD'),
+)

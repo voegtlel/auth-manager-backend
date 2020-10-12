@@ -8,7 +8,7 @@ from authlib.oidc.core import UserInfo
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.params import Header, Body, File, Query
 
-from user_manager.common.config import config
+from user_manager.common.config import config, UserPropertyType
 from user_manager.common.models import User
 from user_manager.common.mongo import async_user_collection, async_user_picture_bucket, \
     async_client_user_cache_collection, async_user_group_collection, async_session_collection, \
@@ -36,6 +36,11 @@ def _get_user_property_value(
     if prop.can_read.has_access(is_self, is_admin):
         if is_registering and user_data.get(prop_key) is None and prop.default:
             return prop.default
+        if prop.type == UserPropertyType.access_token:
+            value = user_data.get(prop_key)
+            if not value:
+                return value
+            return [{'id': val['id'], 'description': val['description']} for val in value]
         return user_data.get(prop_key)
     return None
 
