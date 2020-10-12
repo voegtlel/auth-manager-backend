@@ -375,6 +375,19 @@ manager:
   oauth2:
     server_metadata_url: 'http://127.0.0.1:8000/.well-known/openid-configuration'
     client_id: 'manager'
+  mail:
+    host: localhost
+    sender: "admin@localhost"
+    # port: 25
+    port: null
+    ssl: false
+    starttls: false
+    keyfile: null
+    certfile: null
+    user: null
+    password: "null
+    # user: ""
+    # password: ""
 
   list:
     - email
