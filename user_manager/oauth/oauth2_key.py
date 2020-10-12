@@ -1,6 +1,6 @@
-from typing import List, Any, Optional, cast
+from typing import List, Any, Optional
 
-from authlib.jose import jwk as _jwk
+from authlib.jose import jwk as _jwk, OctKey, RSAKey, ECKey
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
@@ -68,7 +68,7 @@ def load_key(key_config: KeyConfig) -> KeyData:
             private_key = key_config.key
             public_key = private_key
         elif key_config.key.startswith('-----BEGIN'):
-            private_key = load_pem_private_key(cast(Any, key_config.key), key_config.password, default_backend())
+            private_key = load_pem_private_key(key_config.key.encode(), key_config.password, default_backend())
             public_key = private_key.public_key()
         else:
             raise ValueError("key invalid")
@@ -77,9 +77,13 @@ def load_key(key_config: KeyConfig) -> KeyData:
     if algorithm.startswith('RS'):
         if not isinstance(private_key, RSAPrivateKey):
             raise ValueError(f"Need rsa private key for {algorithm}")
-    if algorithm.startswith('DS'):
+        kty = RSAKey.kty
+    elif algorithm.startswith('DS'):
         if not isinstance(private_key, EllipticCurvePrivateKey):
             raise ValueError(f"Need elliptic curve private key for {algorithm}")
+        kty = ECKey.kty
+    else:
+        kty = OctKey.kty
 
     if key_config.use == KeyUse.sig:
         key_ops = ['verify']
@@ -90,7 +94,7 @@ def load_key(key_config: KeyConfig) -> KeyData:
 
     return KeyData(
         jwk=JSONWebKey(
-            alg=algorithm, use=key_config.use, kid=key_config.id, key_ops=key_ops, **_jwk.dumps(public_key)
+            alg=algorithm, use=key_config.use, kid=key_config.id, key_ops=key_ops, **_jwk.dumps(public_key, kty=kty)
         ),
         private_key=private_key,
         publish=key_config.publish,
