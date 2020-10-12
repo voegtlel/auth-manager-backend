@@ -385,7 +385,7 @@ manager:
     keyfile: null
     certfile: null
     user: null
-    password: "null
+    password: null
     # user: ""
     # password: ""
 
