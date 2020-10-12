@@ -44,7 +44,7 @@ class UserTokenAuthentication:
         if authorization_code is None or len(authorization_code.credentials) < 8:
             raise HTTPException(403, "Token invalid or missing")
         result = await async_user_collection.find_one(
-            {'email_postbox_access_token': authorization_code.credentials},
+            {'access_tokens.token': authorization_code.credentials},
             EmailUser.__mongo_attrs__,
         )
         if result is None:
