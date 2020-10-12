@@ -244,7 +244,7 @@ oauth2:
         can_edit: admin
         can_read: self
       access_tokens:
-        type: access_tokens
+        type: access_token
         title: "Access Tokens"
         default: []
         can_edit: admin
@@ -375,10 +375,10 @@ manager:
   oauth2:
     server_metadata_url: 'http://127.0.0.1:8000/.well-known/openid-configuration'
     client_id: 'manager'
+
   mail:
     host: localhost
     sender: "admin@localhost"
-    # port: 25
     port: null
     ssl: false
     starttls: false
@@ -386,8 +386,6 @@ manager:
     certfile: null
     user: null
     password: null
-    # user: ""
-    # password: ""
 
   list:
     - email
