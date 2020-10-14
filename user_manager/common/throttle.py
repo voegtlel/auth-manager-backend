@@ -42,7 +42,7 @@ async def _async_throttle_delay(ip_address_str: str) -> Tuple[float, Optional[da
         return 0, None
     throttle = IpLoginThrottle.validate(throttle_data)
     next_retry = throttle.next_retry.replace(tzinfo=timezone.utc)
-    delay = (next_retry - datetime.utcnow()).total_seconds()
+    delay = (next_retry - datetime.utcnow().replace(tzinfo=timezone.utc)).total_seconds()
     if delay > 0:
         print(f"Throttle check from {ip_address_str} (from {ip_address}): {delay}sec at {throttle.next_retry}")
         return delay, next_retry
