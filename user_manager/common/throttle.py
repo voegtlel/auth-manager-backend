@@ -41,10 +41,11 @@ async def _async_throttle_delay(ip_address_str: str) -> Tuple[float, Optional[da
     if throttle_data is None:
         return 0, None
     throttle = IpLoginThrottle.validate(throttle_data)
-    delay = (throttle.next_retry - datetime.utcnow()).total_seconds()
+    next_retry = throttle.next_retry.replace(tzinfo=timezone.utc)
+    delay = (next_retry - datetime.utcnow()).total_seconds()
     if delay > 0:
         print(f"Throttle check from {ip_address_str} (from {ip_address}): {delay}sec at {throttle.next_retry}")
-        return delay, throttle.next_retry
+        return delay, next_retry
     return 0, None
 
 
@@ -75,11 +76,12 @@ async def async_throttle_failure(ip_address_str: str) -> Tuple[str, str]:
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
     if throttle_data is None:
         delay = config.oauth2.login_throttler.base_delay
+        next_retry = now + timedelta(seconds=delay)
         throttle = IpLoginThrottle(
             ip=ip_address,
             retries=1,
             last_retry=now,
-            next_retry=now + timedelta(seconds=delay),
+            next_retry=next_retry,
             forget_time=now + timedelta(seconds=config.oauth2.login_throttler.reset_cutoff),
         )
         await async_ip_login_throttle_collection.insert_one(throttle.dict(exclude_none=True, by_alias=True))
@@ -90,13 +92,14 @@ async def async_throttle_failure(ip_address_str: str) -> Tuple[str, str]:
         delay = min(
             config.oauth2.login_throttler.base_delay * (2 ** throttle.retries), config.oauth2.login_throttler.max_delay
         )
-        throttle.next_retry = now + timedelta(seconds=delay)
+        next_retry = now + timedelta(seconds=delay)
+        throttle.next_retry = next_retry
         throttle.forget_time = now + timedelta(seconds=config.oauth2.login_throttler.reset_cutoff)
         await async_ip_login_throttle_collection.replace_one(
             {'_id': throttle.ip}, throttle.dict(exclude_none=True, by_alias=True)
         )
     print(f"Throttling {throttle.ip} (from {ip_address_str}) for {delay}sec until {throttle.next_retry}")
-    return format_datetime(throttle.next_retry, usegmt=True), str(int(delay + 0.999))
+    return format_datetime(next_retry, usegmt=True), str(int(delay + 0.999))
 
 
 async def async_throttle_failure_request(request: Request) -> Tuple[str, str]:
