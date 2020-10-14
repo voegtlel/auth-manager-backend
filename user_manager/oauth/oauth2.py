@@ -205,6 +205,7 @@ class UserInfoMixin(object):
 
 
 class AuthorizationCodeGrant(_AuthorizationCodeGrant):
+    TOKEN_ENDPOINT_AUTH_METHODS = ['none', 'client_secret_basic', 'client_secret_post']
     AUTHORIZATION_CODE_LENGTH = config.oauth2.authorization_code_length
 
     def save_authorization_code(self, code: str, request: TypedRequest):
