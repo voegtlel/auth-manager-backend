@@ -49,7 +49,7 @@ async def _async_throttle_delay(ip_address_str: str) -> Tuple[float, Optional[da
 
 
 async def async_throttle_delay(ip_address_str: str) -> Tuple[Optional[str], Optional[str]]:
-    delay, next_retry = _async_throttle_delay(ip_address_str)
+    delay, next_retry = await _async_throttle_delay(ip_address_str)
     if delay > 0:
         return str(int(delay + 0.999)), format_datetime(next_retry, usegmt=True)
     return None, None
