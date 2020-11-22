@@ -217,7 +217,13 @@ if __name__ == '__main__':
         if user.email is None:
             print("Skip", user)
             continue
-        existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1})
+
+        if args.keep_ids:
+            existing_user = mongo.user_collection.find_one(
+                {'$or': [{'email': user.email}, {'_id': user.uid}]}, {'_id': 1}
+            )
+        else:
+            existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1})
         if existing_user is not None:
             print("Update", user)
             user_mapping[user.uid] = existing_user['_id']
