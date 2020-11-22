@@ -67,7 +67,7 @@ class DatabaseReader:
             if password and len(password) > 2 and password[1] == '|':
                 password = password[2:]
             groups_cursor.execute(groups_query, (uid,))
-            groups = [gid for gid, in groups_cursor]
+            groups = [gid.lower() for gid, in groups_cursor]
             profile = UserData(
                 uid=uid,
                 display_name=displayname or account.get('displayname', {}).get('value'),

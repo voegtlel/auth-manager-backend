@@ -32,7 +32,7 @@ async def authorize_card(
 ):
     """Authorize by card ID, requires configured Api Token."""
     if not config.oauth2.card_authentication_api_key:
-        raise HTTPException(400, "Not configured")
+        raise HTTPException(500, "Not configured")
     if api_key_auth != config.oauth2.card_authentication_api_key:
         raise HTTPException(403)
 
@@ -42,12 +42,14 @@ async def authorize_card(
         raise HTTPException(404, "Unknown card")
     user = User.validate(user_data)
     if not user.active:
-        raise HTTPException(404, "User not active")
+        raise HTTPException(400, "User not active")
 
     user_with_groups = await UserWithRoles.async_load_groups(user, config.oauth2.card_authentication_client_id)
+    request = await oauth2_request(request)
+    request.data['client_id'] = config.oauth2.card_authentication_client_id
     resp = await run_in_threadpool(
         authorization.create_authorization_response,
-        request=await oauth2_request(request),
+        request=request,
         grant_user=user_with_groups,
     )
     if isinstance(resp, ErrorJSONResponse):
