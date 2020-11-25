@@ -19,13 +19,18 @@ class RawJSONResponse(Response):
         return content.encode("utf-8")
 
 
-@router.options('/.well-known/jwks')
+@router.options(
+    '/.well-known/jwks',
+    include_in_schema=False,
+    tags=['.well-known'],
+)
 async def get_jwks_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
     '/.well-known/jwks',
+    tags=['.well-known'],
     response_model=JSONWebKeySet,
 )
 async def get_jwks(request: Request):
@@ -53,7 +58,7 @@ class OpenIDConnectResponse(BaseModel):
     ]
     response_modes_supported: Optional[List[str]] = ['query', 'fragment']
     grant_types_supported: List[str] = [
-        'authorization_code', 'implicit', 'refresh_token', 'urn:ietf:params:oauth:grant-type:jwtbearer',
+        'authorization_code', 'implicit', 'refresh_token', 'password', 'urn:ietf:params:oauth:grant-type:jwtbearer',
     ]
     subject_types_supported: List[str] = ['public']
     id_token_signing_alg_values_supported: List[str]
@@ -81,13 +86,18 @@ class OpenIDConnectResponse(BaseModel):
     end_session_endpoint: str
 
 
-@router.options('/.well-known/openid-configuration')
+@router.options(
+    '/.well-known/openid-configuration',
+    include_in_schema=False,
+    tags=['.well-known'],
+)
 async def get_openid_configuration_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
     '/.well-known/openid-configuration',
+    tags=['.well-known'],
     response_model=OpenIDConnectResponse,
 )
 async def get_openid_configuration(request: Request):

@@ -12,13 +12,18 @@ from .session_helper import COOKIE_KEY_STATE, update_session_state
 router = APIRouter()
 
 
-@router.options('/userinfo')
+@router.options(
+    '/userinfo',
+    include_in_schema=False,
+    tags=['OAuth2 Provider: Userinfo'],
+)
 async def get_userinfo_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
     '/userinfo',
+    tags=['OAuth2 Provider: Userinfo'],
     response_model=Dict[str, Any],
 )
 async def get_userinfo(

@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
@@ -16,6 +16,8 @@ from .oauth2_helper import oauth2_request
 
 router = APIRouter()
 
+api_key = APIKeyHeader(name='X-Card-Api-Key')
+
 
 class CardModel(BaseModel):
     card_id: str
@@ -23,12 +25,13 @@ class CardModel(BaseModel):
 
 @router.post(
     '/card/authorize',
+    tags=['Extension: Card Authentication'],
     response_model=Dict[str, Any],
 )
 async def authorize_card(
         request: Request,
         card: CardModel = Body(...),
-        api_key_auth: str = APIKeyHeader(name='X-Card-Api-Key')
+        api_key_auth: str = Security(api_key)
 ):
     """Authorize by card ID, requires configured Api Token."""
     if not config.oauth2.card_authentication_api_key:
@@ -61,12 +64,13 @@ async def authorize_card(
 
 @router.put(
     '/card/register',
+    tags=['Extension: Card Authentication'],
     response_model=Dict[str, Any],
 )
 async def register_card(
         request: Request,
         card: CardModel = Body(...),
-        api_key_auth: str = APIKeyHeader(name='X-Card-Api-Key')
+        api_key_auth: str = Security(api_key)
 ):
     """Set card ID for authorized user, requires configured Api Token."""
     if not config.oauth2.card_authentication_api_key:

@@ -308,5 +308,7 @@ class User(BaseDocument):
     email_postbox_access_groups: List[str] = []
     email_postbox_access_token: Optional[str]
     has_email_alias: Optional[bool]
+    has_postbox: Optional[bool]
+    postbox_quota: Optional[int]
     forward_emails: Optional[bool]
     email_alias: Optional[str]

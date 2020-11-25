@@ -31,14 +31,19 @@ async def _async_get_picture(
     return stream, {'ETag': file_hash}
 
 
-@router.options('/picture/{picture_id}')
+@router.options(
+    '/picture/{picture_id}',
+    include_in_schema=False,
+    tags=['User Manager: User Picture'],
+)
 async def get_picture_options(request: Request):
     return allow_all_get_head_cors.options(request)
 
 
 @router.head(
     '/picture/{picture_id}',
-    tags=['User Manager'],
+    include_in_schema=False,
+    tags=['User Manager: User Picture'],
 )
 async def get_picture_meta(
         picture_id: str,
@@ -56,7 +61,7 @@ async def get_picture_meta(
 
 @router.get(
     '/picture/{picture_id}',
-    tags=['User Manager'],
+    tags=['User Manager: User Picture'],
 )
 async def get_picture(
         picture_id: str,

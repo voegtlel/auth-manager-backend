@@ -300,7 +300,7 @@ async def update_user(
         _validate_property_write('access_tokens', is_self, is_admin)
         existing_access_tokens = [
             UserPasswordAccessToken.validate(access_token)
-            for access_token in user_data['access_tokens']
+            for access_token in user_data.get('access_tokens', [])
         ]
         existing_access_tokens_by_id = {
             existing_access_token.id: existing_access_token
@@ -322,6 +322,7 @@ async def update_user(
                     token=access_token.token,
                 )
             new_access_tokens.append(store_token)
+        del update_data['access_tokens']
         user_data['access_tokens'] = [access_token.dict() for access_token in new_access_tokens]
 
     if 'groups' in update_data:
@@ -433,7 +434,7 @@ async def update_user(
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a valid enum value")
             user_data[key] = value
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"{repr(prop.type)}")
 
     # Set others to default
     if is_new or is_registering:

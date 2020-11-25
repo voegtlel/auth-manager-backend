@@ -11,7 +11,7 @@ router.include_router(user_router)
 router.include_router(group_router)
 router.include_router(client_router)
 
-app = FastAPI(openapi_prefix='/manager')
+app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.manager.backend_cors_origin,

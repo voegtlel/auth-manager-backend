@@ -64,19 +64,22 @@ class TokenRequestBodyParams:
         self.password = password
 
 
-@router.options('/token')
+@router.options(
+    '/token',
+    tags=['OAuth2 Provider: Token'],
+    include_in_schema=False,
+)
 async def issue_token_options(request: Request):
     return allow_all_get_post_cors.options(request)
 
 
 @router.post(
     '/token',
-    tags=['OAuth2 Provider'],
+    tags=['OAuth2 Provider: Token'],
     responses={
         200: {'model': Any},
         302: {'description': 'Redirect to result'},
         400: {'model': ErrorResult},
-        401: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
 )
@@ -111,12 +114,11 @@ async def post_issue_token(
 
 @router.get(
     '/token',
-    tags=['OAuth2 Provider'],
+    tags=['OAuth2 Provider: Token'],
     responses={
         200: {'model': Any},
         302: {'description': 'Redirect to result'},
         400: {'model': ErrorResult},
-        401: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
 )
@@ -147,19 +149,22 @@ async def get_issue_token(
     return response
 
 
-@router.options('/token/revoke')
+@router.options(
+    '/token/revoke',
+    tags=['OAuth2 Provider: Token'],
+    include_in_schema=False,
+)
 async def revoke_token_options(request: Request):
     return allow_all_post_cors.options(request)
 
 
 @router.post(
     '/token/revoke',
-    tags=['OAuth2 Provider'],
+    tags=['OAuth2 Provider: Token'],
     responses={
         200: {'model': Any},
         302: {'description': 'Redirect to result'},
         400: {'model': ErrorResult},
-        401: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
 )

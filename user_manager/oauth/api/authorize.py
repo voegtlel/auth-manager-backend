@@ -59,11 +59,10 @@ class OAuthAuthorizeRequestQueryParams:
 
 @router.get(
     '/authorize',
-    tags=['OAuth2 Provider'],
+    tags=['OAuth2 Provider: Authorize'],
     responses={
         302: {'description': "Redirect to authentication page or redirect_uri if session is valid"},
         400: {'model': ErrorResult},
-        401: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
 )
@@ -108,11 +107,10 @@ class RedirectResult(BaseModel):
 @router.post(
     '/authorize',
     response_model=Any,
-    tags=['OAuth2 Provider'],
+    tags=['OAuth2 Provider: Authorize'],
     responses={
         200: {'model': RedirectResult},
         400: {'model': ErrorResult},
-        401: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
 )
@@ -125,7 +123,7 @@ async def authorize(
     retry_delay, retry_after = await async_throttle(request)
     if retry_delay is not None and retry_after is not None:
         raise HTTPException(
-            401, "Wait", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
+            403, "Wait", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
     potential_users = async_user_collection.find({'email': auth_credentials.email})
     async for potential_user in potential_users:
@@ -137,7 +135,7 @@ async def authorize(
     else:
         retry_after, retry_delay = await async_throttle_failure_request(request)
         raise HTTPException(
-            401, "Invalid E-Mail or Password", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
+            403, "Invalid E-Mail or Password", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
 
     user = User.validate(user_data)

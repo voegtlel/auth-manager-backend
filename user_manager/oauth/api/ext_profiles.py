@@ -10,13 +10,18 @@ from .oauth2_helper import oauth2_request
 router = APIRouter()
 
 
-@router.options('/profiles/{user_id}')
+@router.options(
+    '/profiles/{user_id}',
+    include_in_schema=False,
+    tags=['Extension: Profile'],
+)
 async def get_profile_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
     '/profiles/{user_id}',
+    tags=['Extension: Profile'],
     response_model=Dict[str, Any],
 )
 async def get_profile(
@@ -35,13 +40,18 @@ async def get_profile(
     return response
 
 
-@router.options('/profiles')
+@router.options(
+    '/profiles',
+    include_in_schema=False,
+    tags=['Extension: Profile'],
+)
 async def get_profiles_options(request: Request):
     return allow_all_get_cors.options(request)
 
 
 @router.get(
     '/profiles',
+    tags=['Extension: Profile'],
     response_model=Dict[str, Any],
 )
 async def get_profiles(

@@ -12,6 +12,7 @@ router = APIRouter()
 
 @router.get(
     '/end_session',
+    tags=['OAuth2 Provider: End Session'],
     responses={
         302: {'description': 'Redirect to result'},
     },
