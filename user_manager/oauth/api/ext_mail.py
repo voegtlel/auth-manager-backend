@@ -213,7 +213,7 @@ async def get_redirects(
         uids = group_forwards.get('email_forward_members', [])
         members = []
         if uids:
-            async for user in async_user_collection.find_many({'_id': {'$in': uids}}, projection={
+            async for user in async_user_collection.find({'_id': {'$in': uids}}, projection={
                 'has_email_alias': 1, 'forward_emails': 1, 'email': 1, 'email_alias': 1, '_id': 0,
             }):
                 if user.get('has_email_alias', False) and 'email_alias' in user:
