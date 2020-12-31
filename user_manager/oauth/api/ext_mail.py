@@ -197,16 +197,18 @@ async def get_exists_postbox(
 )
 async def get_redirects(
     email: str,
+    email_user: str = Depends(extract_email_user),
 ) -> List[str]:
-    """Gets the redirects for the passed email address."""
+    """Gets the redirects for the passed email address. Includes both, postboxes and redirects."""
 
     group_forwards = await async_user_group_collection.find_one(
         {
-            '_id': extract_email_user(email),
+            '_id': email_user,
             'enable_email': True,
         },
         projection={
             'email_forward_members': 1,
+            'enable_postbox': 1,
         },
     )
     if group_forwards is not None:
@@ -221,19 +223,23 @@ async def get_redirects(
                     members.append(user['email_alias'])
                 elif user.get('forward_emails', False) and 'email' in user:
                     members.append(user['email'])
-        return []
+        if group_forwards['enable_postbox']:
+            members.append(f'{email_user}@{config.oauth2.mail_domain}')
+        return members
 
     user_forwarding = await async_user_collection.find_one(
         {
             'email_alias': email.lower(),
-            'has_email_alias': True,
         },
-        projection={'forward_emails': 1, 'email': 1, '_id': 0}
+        projection={'forward_emails': 1, 'email': 1, 'has_postbox': 1, '_id': 0}
     )
-    if user_forwarding is not None and 'email' in user_forwarding:
+    if user_forwarding is not None:
+        members = []
         if user_forwarding.get('forward_emails', False) and 'email' in user_forwarding:
-            return [user_forwarding['email']]
-        return []
+            members.append(user_forwarding['email'])
+        if user_forwarding.get('has_postbox', False):
+            members.append(email)
+        return members
     raise HTTPException(404, detail="E-Mail address does not exist")
 
 
