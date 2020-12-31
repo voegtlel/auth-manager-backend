@@ -1,6 +1,6 @@
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Security, Body
+from fastapi import APIRouter, Depends, HTTPException, Security, Body, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.security.base import SecurityBase
 from pydantic import BaseModel
@@ -112,7 +112,7 @@ async def get_exists_email(
             'enable_email': True,
         }
     ) > 0:
-        return
+        return Response(status_code=200)
 
     if await async_user_collection.count_documents(
         {
@@ -120,7 +120,7 @@ async def get_exists_email(
             'enable_email': True,
         }
     ) > 0:
-        return
+        return Response(status_code=200)
     raise HTTPException(404, detail="E-Mail address not found")
 
 
@@ -177,7 +177,7 @@ async def get_exists_postbox(
             'enable_postbox': True,
         }
     ) > 0:
-        return
+        return Response(status_code=200)
 
     if await async_user_collection.count_documents(
         {
@@ -185,7 +185,7 @@ async def get_exists_postbox(
             'enable_postbox': True,
         }
     ) > 0:
-        return
+        return Response(status_code=200)
     raise HTTPException(404, detail="E-Mail address is not a postbox")
 
 
@@ -279,7 +279,7 @@ async def check_postbox_access(
     if user.get('has_postbox', False) and user.get('has_email_alias', False) and \
             user.get('email_alias') == email.lower():
         # User is accessing it's own postbox
-        return
+        return Response(status_code=200)
 
     # Check if user is accessing group postbox
     if await async_user_group_collection.count_documents(
@@ -291,7 +291,7 @@ async def check_postbox_access(
         }
     ) > 0:
         # Yes, user is in the group and authenticated
-        return
+        return Response(status_code=200)
 
     retry_after, retry_delay = await async_throttle_failure(credentials.client_ip)
     raise HTTPException(
@@ -331,7 +331,7 @@ async def check_send_access(
         )
     if user.get('has_email_alias', False) and user.get('email_alias') == email.lower():
         # User is sending from it's own alias
-        return
+        return Response(status_code=200)
 
     # Check if user wants to send from group email
     if await async_user_group_collection.count_documents(
@@ -345,7 +345,7 @@ async def check_send_access(
         }
     ) > 0:
         # Yes, user is in the group and authenticated
-        return
+        return Response(status_code=200)
 
     retry_after, retry_delay = await async_throttle_failure(credentials.client_ip)
     raise HTTPException(
