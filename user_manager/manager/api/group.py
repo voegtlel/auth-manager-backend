@@ -1,14 +1,16 @@
-import time
-from typing import List, Sequence
+from datetime import datetime, timezone
+from typing import List, Sequence, Union, Dict
+from uuid import uuid4
 
+import time
 from authlib.oidc.core import UserInfo
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Body
 
-from user_manager.common.models import UserGroup
+from user_manager.common.models import DbUserGroup, DbUserHistory, DbChange
 from user_manager.common.mongo import async_user_group_collection, \
     async_client_user_cache_collection, async_user_collection, \
-    async_client_collection
+    async_client_collection, async_user_history_collection
 from user_manager.manager.auth import Authentication
 from user_manager.manager.models import GroupInRead, GroupInCreate, GroupInWrite, GroupInList
 
@@ -29,9 +31,23 @@ async def get_groups(
     else:
         group_filter = {'visible': True}
     return [
-        GroupInList.validate(UserGroup.validate(group))
+        GroupInList.validate(DbUserGroup.validate(group))
         async for group in async_user_group_collection.find(group_filter)
     ]
+
+
+async def _merge_update_user_history(history_entries: List[DbUserHistory]):
+    if history_entries:
+        history_entries_by_uid: Dict[str, DbUserHistory] = {}
+        for entry in history_entries:
+            if entry.user_id in history_entries_by_uid:
+                history_entries_by_uid[entry.user_id].changes.extend(entry.changes)
+            else:
+                history_entries_by_uid[entry.user_id] = entry
+        await async_user_history_collection.insert_many([
+            entry.dict(by_alias=True, exclude_none=True)
+            for entry in history_entries_by_uid.values()
+        ])
 
 
 @router.post(
@@ -46,7 +62,7 @@ async def create_group(
     """Creates a group."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_group = UserGroup.validate(group_data)
+    new_group = DbUserGroup.validate(group_data)
     new_group.id = new_group.id.lower()
     if not new_group.enable_email:
         new_group.email_forward_members = []
@@ -55,6 +71,7 @@ async def create_group(
         new_group.email_postbox_access_members = []
     await async_user_group_collection.insert_one(new_group.dict(exclude_none=True, by_alias=True))
     timestamp = int(time.time())
+    history_entries: List[DbUserHistory] = []
     if new_group.members:
         await async_client_user_cache_collection.delete_many({'user_id': {'$in': new_group.members}})
         await async_user_collection.update_many(
@@ -64,6 +81,13 @@ async def create_group(
                 '$set': {'updated_at': timestamp},
             }
         )
+        history_entries.extend(DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='groups', value=f'Added {new_group.id}')],
+        ) for user_id in new_group.members)
     if new_group.email_forward_members:
         await async_user_collection.update_many(
             {'_id': {'$in': new_group.email_forward_members}},
@@ -72,6 +96,13 @@ async def create_group(
                 '$set': {'updated_at': timestamp},
             }
         )
+        history_entries.extend(DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_forward_groups', value=f'Added {new_group.id}')],
+        ) for user_id in new_group.email_forward_members)
     if new_group.email_allowed_forward_members:
         await async_user_collection.update_many(
             {'_id': {'$in': new_group.email_allowed_forward_members}},
@@ -80,6 +111,13 @@ async def create_group(
                 '$set': {'updated_at': timestamp},
             }
         )
+        history_entries.extend(DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_allowed_forward_groups', value=f'Added {new_group.id}')],
+        ) for user_id in new_group.email_allowed_forward_members)
     if new_group.email_postbox_access_members:
         await async_user_collection.update_many(
             {'_id': {'$in': new_group.email_postbox_access_members}},
@@ -88,6 +126,15 @@ async def create_group(
                 '$set': {'updated_at': timestamp},
             }
         )
+        history_entries.extend(DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_postbox_access_groups', value=f'Added {new_group.id}')],
+        ) for user_id in new_group.email_postbox_access_members)
+
+    await _merge_update_user_history(history_entries)
 
 
 @router.get(
@@ -104,11 +151,14 @@ async def get_group(
     group_data = await async_user_group_collection.find_one({'_id': group_id})
     if group_data is None:
         raise HTTPException(404)
-    return GroupInRead.validate(UserGroup.validate(group_data))
+    return GroupInRead.validate(DbUserGroup.validate(group_data))
 
 
 async def _update_groups(
-        group, group_update,
+        group: DbUserGroup,
+        group_update: Union[DbUserGroup, GroupInWrite],
+        author_id: str,
+        history_entries: List[DbUserHistory],
         attr_name: str,
         add_user_attr_name: str,
         pull_user_attr_names: Sequence[str],
@@ -138,6 +188,16 @@ async def _update_groups(
                     '$set': {'updated_at': timestamp},
                 }
             )
+            history_entries.extend(
+                DbUserHistory(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                    author_id=author_id,
+                    changes=[DbChange(property=add_user_attr_name, value=f'Added {group.id}')],
+                )
+                for user_id in added_users
+            )
         if removed_users:
             await async_user_collection.update_many(
                 {'_id': {'$in': list(removed_users)}},
@@ -148,6 +208,17 @@ async def _update_groups(
                     },
                     '$set': {'updated_at': timestamp},
                 }
+            )
+            history_entries.extend(
+                DbUserHistory(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                    author_id=author_id,
+                    changes=[DbChange(property=attr, value=f'Removed {group.id}')],
+                )
+                for user_id in removed_users
+                for attr in pull_user_attr_names
             )
             for attr in pull_group_attr_names:
                 group_attr = getattr(group, attr)
@@ -173,7 +244,7 @@ async def update_group(
     group_data = await async_user_group_collection.find_one({'_id': group_id})
     if group_data is None:
         raise HTTPException(404)
-    group = UserGroup.validate(group_data)
+    group = DbUserGroup.validate(group_data)
 
     if not group_update.enable_email:
         group_update.email_forward_members = []
@@ -181,9 +252,13 @@ async def update_group(
     if not group_update.enable_postbox:
         group_update.email_postbox_access_members = []
 
+    history_entries = []
+
     await _update_groups(
         group,
         group_update,
+        author_id=user.sub,
+        history_entries=history_entries,
         attr_name='members',
         add_user_attr_name='groups',
         pull_user_attr_names=('groups', 'email_forward_groups', 'email_allowed_forward_groups'),
@@ -195,6 +270,8 @@ async def update_group(
     await _update_groups(
         group,
         group_update,
+        author_id=user.sub,
+        history_entries=history_entries,
         attr_name='email_allowed_forward_members',
         add_user_attr_name='email_allowed_forward_groups',
         pull_user_attr_names=('email_forward_groups', 'email_allowed_forward_groups'),
@@ -204,6 +281,8 @@ async def update_group(
     await _update_groups(
         group,
         group_update,
+        author_id=user.sub,
+        history_entries=history_entries,
         attr_name='email_forward_members',
         add_user_attr_name='email_forward_groups',
         pull_user_attr_names=('email_forward_groups',),
@@ -212,11 +291,15 @@ async def update_group(
     await _update_groups(
         group,
         group_update,
+        author_id=user.sub,
+        history_entries=history_entries,
         attr_name='email_postbox_access_members',
         add_user_attr_name='email_postbox_access_groups',
         pull_user_attr_names=('email_postbox_access_groups',),
         clear_cache=False,
     )
+
+    await _merge_update_user_history(history_entries)
 
     group.update_from(group_update)
     result = await async_user_group_collection.replace_one(
@@ -261,6 +344,47 @@ async def delete_group(
             'member_groups': group_id,
         }}
     )
+    delete_group_data = await async_user_group_collection.find_one({'_id': group_id})
+    if delete_group_data is None:
+        raise HTTPException(404)
+    delete_group = DbUserGroup.validate(delete_group_data)
+    await _merge_update_user_history([
+        DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='groups', value=f'Removed {delete_group.id}')],
+        )
+        for user_id in delete_group.members
+    ] + [
+        DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_forward_groups', value=f'Removed {delete_group.id}')],
+        )
+        for user_id in delete_group.email_forward_members
+    ] + [
+        DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_allowed_forward_groups', value=f'Removed {delete_group.id}')],
+        )
+        for user_id in delete_group.email_allowed_forward_members
+    ] + [
+        DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_id,
+            timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+            author_id=user.sub,
+            changes=[DbChange(property='email_postbox_access_groups', value=f'Removed {delete_group.id}')],
+        )
+        for user_id in delete_group.email_postbox_access_members
+    ])
     result = await async_user_group_collection.delete_one({'_id': group_id})
     if result.deleted_count != 1:
         raise HTTPException(404)

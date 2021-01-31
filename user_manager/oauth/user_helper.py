@@ -4,7 +4,7 @@ from authlib.common.security import generate_token
 from fastapi import HTTPException
 from pydantic.main import BaseModel
 
-from user_manager.common.models import UserGroup, User, ClientUserCache
+from user_manager.common.models import DbUserGroup, DbUser, DbClientUserCache
 from user_manager.common.mongo import user_group_collection, async_user_group_collection, client_collection, \
     client_user_cache_collection, async_client_collection, async_client_user_cache_collection, user_collection, \
     async_user_collection
@@ -21,7 +21,7 @@ def _resolve_groups(
             },
             {
                 '$graphLookup': {
-                    'from': UserGroup.__collection_name__,
+                    'from': DbUserGroup.__collection_name__,
                     'startWith': '$member_groups',
                     'connectFromField': 'member_groups',
                     'connectToField': '_id',
@@ -49,7 +49,7 @@ async def _async_resolve_groups(
             },
             {
                 '$graphLookup': {
-                    'from': UserGroup.__collection_name__,
+                    'from': DbUserGroup.__collection_name__,
                     'startWith': '$member_groups',
                     'connectFromField': 'member_groups',
                     'connectToField': '_id',
@@ -66,7 +66,7 @@ async def _async_resolve_groups(
     }
 
 
-def _create_user_cache_for_user_client(user_data: User, client_id: str) -> Optional[dict]:
+def _create_user_cache_for_user_client(user_data: DbUser, client_id: str) -> Optional[dict]:
     """Returns the cache entry or none if not authenticated."""
     user_groups = _resolve_groups(user_data.groups)
 
@@ -87,7 +87,7 @@ def _create_user_cache_for_user_client(user_data: User, client_id: str) -> Optio
         group for user_group in client_user_groups for group in user_groups.get(user_group, [])
     }
     if client_user_groups and client_user_roles:
-        cache_entry = ClientUserCache(
+        cache_entry = DbClientUserCache(
             id=generate_token(30),
             client_id=client_id,
             user_id=user_data.id,
@@ -100,7 +100,7 @@ def _create_user_cache_for_user_client(user_data: User, client_id: str) -> Optio
     return None
 
 
-async def _async_create_user_cache_for_user_client(user_data: User, client_id: str) -> Optional[dict]:
+async def _async_create_user_cache_for_user_client(user_data: DbUser, client_id: str) -> Optional[dict]:
     """Returns the cache entry or none if not authenticated."""
     user_groups = await _async_resolve_groups(user_data.groups)
 
@@ -121,7 +121,7 @@ async def _async_create_user_cache_for_user_client(user_data: User, client_id: s
         group for user_group in client_user_groups for group in user_groups.get(user_group, [])
     }
     if client_user_groups and client_user_roles:
-        cache_entry = ClientUserCache(
+        cache_entry = DbClientUserCache(
             id=generate_token(30),
             client_id=client_id,
             user_id=user_data.id,
@@ -135,7 +135,7 @@ async def _async_create_user_cache_for_user_client(user_data: User, client_id: s
 
 
 class UserWithRoles(BaseModel):
-    user: User
+    user: DbUser
     roles: List[str]
     last_modified: int
 
@@ -144,13 +144,13 @@ class UserWithRoles(BaseModel):
         user_data = user_collection.find_one({'_id': user_id})
         if user_data is None:
             return None
-        user = User.validate(user_data)
+        user = DbUser.validate(user_data)
         if not user.active:
             raise HTTPException(401, "User inactive")
         return UserWithRoles.load_groups(user, client_id)
 
     @staticmethod
-    def load_groups(user: User, client_id: str) -> Optional['UserWithRoles']:
+    def load_groups(user: DbUser, client_id: str) -> Optional['UserWithRoles']:
         if not user.active:
             raise HTTPException(401, "User inactive")
         group_data = client_user_cache_collection.find_one({
@@ -168,13 +168,13 @@ class UserWithRoles(BaseModel):
         user_data = await async_user_collection.find_one({'_id': user_id})
         if user_data is None:
             return None
-        user = User.validate(user_data)
+        user = DbUser.validate(user_data)
         if not user.active:
             raise HTTPException(401, "User inactive")
         return await UserWithRoles.async_load_groups(user, client_id)
 
     @staticmethod
-    async def async_load_groups(user: User, client_id: str) -> Optional['UserWithRoles']:
+    async def async_load_groups(user: DbUser, client_id: str) -> Optional['UserWithRoles']:
         if not user.active:
             raise HTTPException(401, "User inactive")
         group_data = await async_client_user_cache_collection.find_one({
@@ -188,7 +188,7 @@ class UserWithRoles(BaseModel):
         return UserWithRoles(user=user, roles=group_data['roles'], last_modified=group_data['last_modified'])
 
     @staticmethod
-    async def async_load_all(client_id: str) -> AsyncIterator[User]:
+    async def async_load_all(client_id: str) -> AsyncIterator[DbUser]:
         client = await async_client_collection.find_one({'_id': client_id}, {'_id': 0, 'access_groups': 1})
         if client is None:
             raise HTTPException(400, "Invalid client")
@@ -200,4 +200,4 @@ class UserWithRoles(BaseModel):
         all_client_groups = set(group for groups in all_client_group_maps.values() for group in groups)
 
         async for user_data in async_user_collection.find({'groups': {'$in': all_client_groups}}):
-            yield User.validate(user_data)
+            yield DbUser.validate(user_data)

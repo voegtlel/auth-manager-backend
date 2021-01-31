@@ -37,18 +37,22 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response, JSONResponse
 
 from user_manager.common.config import config
-from user_manager.common.models import AuthorizationCode, Token, Client, User
+from user_manager.common.models import DbAuthorizationCode, DbToken, DbClient, DbUser, DbManagerSchema, DbUserProperty, \
+    UserPropertyType
 from user_manager.common.mongo import authorization_code_collection, token_collection, \
     client_collection, client_user_cache_collection, user_group_collection, async_token_collection, \
-    async_user_group_collection, async_client_collection, user_collection
+    async_user_group_collection, async_client_collection, user_collection, read_schema, async_read_schema
 from . import oauth2_key
 from .user_helper import UserWithRoles
 
 
+USERS_SCOPE = '*users'
+
+
 class TypedRequest(OAuth2Request):
     user: UserWithRoles
-    credential: Union[AuthorizationCode, Token]
-    client: Client
+    credential: Union[DbAuthorizationCode, DbToken]
+    client: DbClient
 
 
 class RedirectResponse(Response):
@@ -117,7 +121,7 @@ class AuthorizationServer(_AuthorizationServer):
 
 def save_authorization_code(code: str, request: TypedRequest):
     nonce = request.data.get('nonce')
-    item = AuthorizationCode(
+    item = DbAuthorizationCode(
         code=code,
         client_id=request.client.id,
         redirect_uri=request.redirect_uri,
@@ -159,48 +163,70 @@ class JwtConfigMixin(object):
 
 
 class UserInfoMixin(object):
+    def _translate_properties(self, scope: str, schema: DbManagerSchema) -> List[Tuple[str, DbUserProperty, Optional[str]]]:
+        scope_list = ['*'] + scope_to_list(scope)
+        return [
+            (prop.valid_key, schema.properties_by_key[prop.user_property], prop.group_type)
+            for scope_name in scope_list
+            if scope_name not in ('openid', 'offline_access') and scope_name in schema.scopes_by_key
+            for prop in schema.scopes_by_key[scope_name].properties
+            if prop.user_property in schema.properties_by_key
+        ]
+
     def generate_user_info(self, user: UserWithRoles, scope: str):
-        scope_list = scope_to_list(scope)
-        includes = set()
-        for scope in scope_list:
-            if scope not in ('openid', 'offline_access'):
-                includes.update(config.oauth2.user.scopes[scope].properties)
-        user_data = user.user.dict(include=includes, by_alias=True, exclude_none=True)
-        user_data['sub'] = user.user.id
-        user_data['roles'] = user.roles
-        if 'picture' in user_data:
-            user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
-        if 'groups' in user_data:
-            # Only include visible groups
-            user_data['groups'] = [
-                group['_id']
-                for group in user_group_collection.find(
-                    {'_id': {'$in': user_data['groups']}, 'visible': True},
-                    projection={'_id': 1}
-                )
-            ]
+        user_data = {
+            'roles': user.roles,
+        }
+        for key, prop, group_type in self._translate_properties(scope, read_schema()):
+            if not hasattr(user.user, prop.key):
+                continue
+            value = getattr(user.user, prop.key, None)
+            if prop.type == UserPropertyType.picture:
+                value = f"{config.oauth2.base_url}/picture/{value}"
+            elif prop.type == UserPropertyType.groups:
+                filter: dict = {'_id': {'$in': user_data['groups']}, 'visible': True, }
+                if group_type is not None:
+                    filter['group_type'] = group_type
+                value = [
+                    group['_id']
+                    for group in user_group_collection.find(
+                        {'_id': {'$in': user_data['groups']}, 'visible': True},
+                        projection={'_id': 1}
+                    )
+                ]
+            elif prop.type in (
+                    UserPropertyType.access_token, UserPropertyType.password, UserPropertyType.token
+            ):
+                continue
+            user_data[key] = value
         return UserInfo(**user_data)
 
     async def async_generate_user_info(self, user: UserWithRoles, scope: str):
-        scope_list = scope_to_list(scope)
-        includes = set()
-        for scope in scope_list:
-            if scope not in ('openid', 'offline_access'):
-                includes.update(config.oauth2.user.scopes[scope].properties)
-        user_data = user.user.dict(include=includes, by_alias=True, exclude_none=True)
-        user_data['sub'] = user.user.id
-        user_data['roles'] = user.roles
-        if 'picture' in user_data:
-            user_data['picture'] = f"{config.oauth2.base_url}/picture/{user_data['picture']}"
-        if 'groups' in user_data:
-            # Only include visible groups
-            user_data['groups'] = [
-                group['_id']
-                async for group in async_user_group_collection.find(
-                    {'_id': {'$in': user_data['groups']}, 'visible': True},
-                    projection={'_id': 1}
-                )
-            ]
+        user_data = {
+            'roles': user.roles,
+        }
+        for key, prop, group_type in self._translate_properties(scope, await async_read_schema()):
+            if not hasattr(user.user, prop.key):
+                continue
+            value = getattr(user.user, prop.key, None)
+            if prop.type == UserPropertyType.picture:
+                value = f"{config.oauth2.base_url}/picture/{value}"
+            elif prop.type == UserPropertyType.groups:
+                filter: dict = {'_id': {'$in': user_data['groups']}, 'visible': True, }
+                if group_type is not None:
+                    filter['group_type'] = group_type
+                value = [
+                    group['_id']
+                    async for group in async_user_group_collection.find(
+                        {'_id': {'$in': user_data['groups']}, 'visible': True},
+                        projection={'_id': 1}
+                    )
+                ]
+            elif prop.type in (
+                    UserPropertyType.access_token, UserPropertyType.password, UserPropertyType.token
+            ):
+                continue
+            user_data[key] = value
         return UserInfo(**user_data)
 
 
@@ -211,19 +237,19 @@ class AuthorizationCodeGrant(_AuthorizationCodeGrant):
     def save_authorization_code(self, code: str, request: TypedRequest):
         return save_authorization_code(code, request)
 
-    def query_authorization_code(self, code: str, client: Client):
+    def query_authorization_code(self, code: str, client: DbClient):
         auth_code_data = authorization_code_collection.find_one({'_id': code, 'client_id': client.id})
         if auth_code_data is None:
             return None
-        auth_code = AuthorizationCode.validate(auth_code_data)
+        auth_code = DbAuthorizationCode.validate(auth_code_data)
         if auth_code.is_expired():
             return None
         return auth_code
 
-    def delete_authorization_code(self, authorization_code: AuthorizationCode):
+    def delete_authorization_code(self, authorization_code: DbAuthorizationCode):
         authorization_code_collection.delete_one({'_id': authorization_code.code})
 
-    def authenticate_user(self, authorization_code: AuthorizationCode):
+    def authenticate_user(self, authorization_code: DbAuthorizationCode):
         return UserWithRoles.load(authorization_code.user_id, authorization_code.client_id)
 
 
@@ -239,7 +265,7 @@ class ResourceOwnerPasswordCredentialsGrant(_ResourceOwnerPasswordCredentialsGra
         user_data = user_collection.find_one({'email': username, 'access_tokens.token': password, 'active': True})
         if user_data is None:
             return None
-        return UserWithRoles.load_groups(User.validate(user_data), self.client.id)
+        return UserWithRoles.load_groups(DbUser.validate(user_data), self.client.id)
 
 
 class OpenIDCode(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDCode):
@@ -253,7 +279,7 @@ class OpenIDImplicitGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _Open
 class OpenIDHybridGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDHybridGrant):
     jwt_token_expiration = config.oauth2.token_expiration.implicit
 
-    def create_authorization_code(self, client: Client, grant_user: UserWithRoles, request: TypedRequest):
+    def create_authorization_code(self, client: DbClient, grant_user: UserWithRoles, request: TypedRequest):
         return save_authorization_code(generate_token(config.oauth2.authorization_code_length), request)
 
 
@@ -265,15 +291,15 @@ class RefreshTokenGrant(_RefreshTokenGrant):
         token_data = token_collection.find_one({'refresh_token': refresh_token})
         if token_data is None:
             return None
-        auth_code = Token.validate(token_data)
+        auth_code = DbToken.validate(token_data)
         if auth_code.is_expired():
             return None
         return auth_code
 
-    def authenticate_user(self, credential: Token):
+    def authenticate_user(self, credential: DbToken):
         return UserWithRoles.load(credential.user_id, credential.client_id)
 
-    def revoke_old_credential(self, credential: Token):
+    def revoke_old_credential(self, credential: DbToken):
         # token_collection.update_one({'_id': credential.access_token}, {'revoked': True})
         token_collection.delete_one({'_id': credential.access_token})
 
@@ -284,7 +310,7 @@ def save_token(token: Dict[str, Any], request: TypedRequest):
     else:
         user_id = None
     now = int(time.time())
-    token_data = Token.validate({
+    token_data = DbToken.validate({
         'client_id': request.client.id,
         'user_id': user_id,
         'issued_at': now,
@@ -301,14 +327,14 @@ def query_client(client_id: str):
     client_data = client_collection.find_one({'_id': client_id})
     if client_data is None:
         return None
-    return Client.validate(client_data)
+    return DbClient.validate(client_data)
 
 
 async def async_query_client(client_id: str):
     client_data = await async_client_collection.find_one({'_id': client_id})
     if client_data is None:
         return None
-    return Client.validate(client_data)
+    return DbClient.validate(client_data)
 
 
 def token_generator(*_):
@@ -318,7 +344,7 @@ def token_generator(*_):
 class AccessTokenGenerator(UserInfoMixin, JwtConfigMixin):
     jwt_token_expiration = config.oauth2.token_expiration.authorization_code
 
-    def __call__(self, client: Client, grant_type: str, user: UserWithRoles, scope: str):
+    def __call__(self, client: DbClient, grant_type: str, user: UserWithRoles, scope: str):
         jwt_config = self.get_jwt_config()
         jwt_config['aud'] = [client.get_client_id()]
         jwt_config['auth_time'] = int(time.time())
@@ -376,7 +402,7 @@ class BearerTokenValidator(_BearerTokenValidator):
         token_data = token_collection.find_one({'_id': token_string})
         if token_data is None:
             return None
-        token = Token.validate(token_data)
+        token = DbToken.validate(token_data)
         if client_user_cache_collection.count_documents({
             'client_id': token.client_id,
             'user_id': token.user_id,
@@ -387,12 +413,12 @@ class BearerTokenValidator(_BearerTokenValidator):
     def request_invalid(self, request: TypedRequest):
         return False
 
-    def token_revoked(self, token: Token):
+    def token_revoked(self, token: DbToken):
         return token.revoked
 
 
 class ResourceProtector(_ResourceProtector):
-    def validate(self, request: OAuth2Request, scope: str = None, scope_operator='AND') -> Token:
+    def validate(self, request: OAuth2Request, scope: str = None, scope_operator='AND') -> DbToken:
         assert isinstance(request, OAuth2Request)
         return self.validate_request(scope, request, scope_operator)
 
@@ -435,12 +461,12 @@ class OtherUserInspection(UserInfoMixin):
             request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
             if request.token is None:
                 raise HTTPException(403, "Invalid token")
-            if 'users' not in scope_to_list(request.token.scope):
-                raise InsufficientScopeError('Missing "users" scope', request.uri)
+            if USERS_SCOPE not in scope_to_list(request.token.scope):
+                raise InsufficientScopeError('Missing "*users" scope', request.uri)
             user = await UserWithRoles.async_load(user_id, request.token.client_id)
             if user is None:
                 raise HTTPException(404, "User not found")
-            user_info = await self.async_generate_user_info(user, 'users')
+            user_info = await self.async_generate_user_info(user, USERS_SCOPE)
             return JSONResponse(user_info)
         except OAuth2Error as error:
             return authorization.handle_error_response(request, error)
@@ -453,13 +479,13 @@ class OtherUsersInspection(UserInfoMixin):
             request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
             if request.token is None:
                 raise HTTPException(403, "Invalid token")
-            if 'users' not in scope_to_list(request.token.scope):
-                raise InsufficientScopeError('Missing "users" scope', request.uri)
+            if USERS_SCOPE not in scope_to_list(request.token.scope):
+                raise InsufficientScopeError('Missing "*users" scope', request.uri)
             user_infos = []
             async for user in UserWithRoles.async_load_all(request.token.client_id):
                 user_info = await self.async_generate_user_info(
                     UserWithRoles(user=user, roles=[], last_modified=user.updated_at),
-                    'users'
+                    USERS_SCOPE
                 )
                 del user_info['roles']
                 user_infos.append(user_info)
@@ -485,7 +511,7 @@ class RevocationEndpoint:
             token_data = await async_token_collection.find_one({'refresh_token': raw_token})
         if token_data is None:
             return Response()
-        token = Token.validate(token_data)
+        token = DbToken.validate(token_data)
         try:
             if request.client_id is None:
                 request.data['client_id'] = token.client_id

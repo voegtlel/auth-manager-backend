@@ -4,7 +4,7 @@ from authlib.oidc.core import UserInfo
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Body
 
-from user_manager.common.models import Client
+from user_manager.common.models import DbClient
 from user_manager.common.mongo import async_client_collection, async_client_user_cache_collection
 from user_manager.manager.auth import Authentication
 from user_manager.manager.models import ClientInRead, ClientInList, ClientInWrite, ClientInCreate
@@ -24,7 +24,7 @@ async def get_clients(
     if 'admin' not in user['roles']:
         raise HTTPException(401)
     return [
-        ClientInList.validate(Client.validate(client)) async for client in async_client_collection.find()
+        ClientInList.validate(DbClient.validate(client)) async for client in async_client_collection.find()
     ]
 
 
@@ -40,7 +40,7 @@ async def create_client(
     """Creates a client."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_client = Client.validate(client_data)
+    new_client = DbClient.validate(client_data)
     await async_client_collection.insert_one(new_client.dict(exclude_none=True, by_alias=True))
 
 
@@ -58,7 +58,7 @@ async def get_client(
     client_data = await async_client_collection.find_one({'_id': client_id})
     if client_data is None:
         raise HTTPException(404)
-    return ClientInRead.validate(Client.validate(client_data))
+    return ClientInRead.validate(DbClient.validate(client_data))
 
 
 @router.put(
@@ -76,7 +76,7 @@ async def update_client(
     if await async_client_collection.count_documents({'_id': client_id}) != 1:
         raise HTTPException(404)
 
-    client = Client.validate(client_update)
+    client = DbClient.validate(client_update)
     await async_client_user_cache_collection.delete_many({'client_id': client_id})
     result = await async_client_collection.replace_one(
         {'_id': client_id},

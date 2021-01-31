@@ -1,4 +1,6 @@
 import re
+from uuid import uuid4
+
 import time
 from base64 import b64encode, b64decode
 from datetime import datetime
@@ -9,14 +11,15 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from pydantic.datetime_parse import parse_datetime, parse_date
 from pyisemail import is_email
-from pytz import UTC, timezone, UnknownTimeZoneError
 from unidecode import unidecode
 
-from user_manager.common.config import config, UserPropertyType
-from user_manager.common.models import User, UserPasswordAccessToken
+from user_manager.common.config import config
+from user_manager.common.models import DbUser, DbUserPasswordAccessToken, UserPropertyType, DbUserHistory, DbChange, \
+    DbManagerSchema, DbUserProperty
 from user_manager.common.mongo import async_user_collection, \
     async_client_user_cache_collection, async_authorization_code_collection, async_session_collection, \
-    async_token_collection, async_user_group_collection, user_collection
+    async_token_collection, async_user_group_collection, user_collection, async_user_history_collection, \
+    async_read_schema
 from user_manager.common.password_helper import verify_and_update, create_password, PasswordLeakedException
 from user_manager.manager.helper import get_regex, DotDict
 from user_manager.manager.mailer import mailer
@@ -41,20 +44,17 @@ def normalize_username(display_name: str) -> str:
     return username
 
 
-def _get_tz(zoneinfo: str = None) -> datetime.tzinfo:
-    if zoneinfo is None:
-        zoneinfo = config.oauth2.user.properties['zoneinfo'].default
-    try:
-        return timezone(zoneinfo)
-    except UnknownTimeZoneError:
-        return UTC
-
-
 async def async_send_mail_register(
-        user_data: DotDict, token_valid_until: int, locale: str = None, tz: datetime.tzinfo = None
+        user_data: DotDict,
+        schema: DbManagerSchema,
+        token_valid_until: int,
+        locale: str = None,
+        tz: datetime.tzinfo = None,
+        author_id: str = None,
+        history_entry: DbUserHistory = None,
 ):
     if tz is None:
-        tz = _get_tz(user_data.get('zoneinfo'))
+        tz = schema.get_tz(user_data.get('zoneinfo'))
     if locale is None:
         locale = user_data.get('locale', 'en_us'),
     await mailer.async_send_mail(
@@ -67,10 +67,30 @@ async def async_send_mail_register(
             'user': user_data,
         },
     )
+    if history_entry is None:
+        await async_user_history_collection.insert_one(
+            DbUserHistory(
+                id=str(uuid4()),
+                user_id=user_data['_id'] if author_id is None else author_id,
+                timestamp=datetime.utcnow(),
+                author_id=user_data['_id'],
+                changes=[
+                    DbChange(property='email', value="Sent Registration E-Mail"),
+                ],
+            ).dict(by_alias=True, exclude_none=True)
+        )
+    else:
+        history_entry.changes.append(DbChange(property='email', value="Sent Registration E-Mail"))
 
 
 async def async_send_mail_verify(
-        locale: Optional[str], mail: str, user_data: DotDict, token_valid_until: int, tz: datetime.tzinfo
+        locale: Optional[str],
+        mail: str,
+        user_data: DotDict,
+        token_valid_until: int,
+        tz: datetime.tzinfo,
+        author_id: str = None,
+        history_entry: DbUserHistory = None,
 ):
     if locale is None:
         locale = user_data.get('locale', 'en_us'),
@@ -84,11 +104,33 @@ async def async_send_mail_verify(
             'user': user_data,
         },
     )
+    if history_entry is None:
+        await async_user_history_collection.insert_one(
+            DbUserHistory(
+                id=str(uuid4()),
+                user_id=user_data['_id'] if author_id is None else author_id,
+                timestamp=datetime.utcnow(),
+                author_id=user_data['_id'],
+                changes=[
+                    DbChange(property='email', value="Sent E-Mail Verification E-Mail"),
+                ],
+            ).dict(by_alias=True, exclude_none=True)
+        )
+    else:
+        history_entry.changes.append(
+            DbChange(property='email', value="Sent E-Mail Verification E-Mail")
+        )
 
 
-async def async_send_mail_reset_password(user_data: DotDict, token_valid_until: int, tz: datetime.tzinfo = None):
+async def async_send_mail_reset_password(
+        user_data: DotDict,
+        schema: DbManagerSchema,
+        token_valid_until: int,
+        tz: datetime.tzinfo = None,
+        author_id: str = None,
+):
     if tz is None:
-        tz = _get_tz(user_data.get('zoneinfo'))
+        tz = schema.get_tz(user_data.get('zoneinfo'))
     await mailer.async_send_mail(
         user_data.get('locale', 'en_us'),
         'password_reset',
@@ -98,6 +140,17 @@ async def async_send_mail_reset_password(user_data: DotDict, token_valid_until: 
             'valid_until': datetime.fromtimestamp(token_valid_until, tz),
             'user': user_data,
         },
+    )
+    await async_user_history_collection.insert_one(
+        DbUserHistory(
+            id=str(uuid4()),
+            user_id=user_data['_id'] if author_id is None else author_id,
+            timestamp=datetime.utcnow(),
+            author_id=user_data['_id'],
+            changes=[
+                DbChange(property='email', value="Sent Reset Password E-Mail"),
+            ],
+        ).dict(by_alias=True, exclude_none=True)
     )
 
 
@@ -129,7 +182,11 @@ def check_token(token: str) -> str:
     return data
 
 
-async def update_resend_registration(user_data: DotDict):
+async def update_resend_registration(
+        user_data: DotDict,
+        schema: DbManagerSchema,
+        author_id: str,
+):
     token_valid_until = int(time.time() + config.manager.token_valid.registration)
     user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
     await async_user_collection.update_one({'_id': user_data['_id']}, {
@@ -139,11 +196,11 @@ async def update_resend_registration(user_data: DotDict):
         }
     })
     await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
-    await async_send_mail_register(user_data, token_valid_until)
+    await async_send_mail_register(user_data, schema, token_valid_until, author_id=author_id)
 
 
-def _validate_property_write(key: str, is_self: bool, is_admin: bool):
-    prop = config.oauth2.user.properties.get(key)
+def _validate_property_write(schema: DbManagerSchema, key: str, is_self: bool, is_admin: bool):
+    prop = schema.properties_by_key.get(key)
     if prop is None:
         raise HTTPException(400, f"{repr(key)}={repr(prop)} is not a valid property")
     elif not prop.can_edit.has_access(is_self, is_admin):
@@ -161,8 +218,10 @@ def make_username(name: str) -> str:
 
 async def _update_groups(
         user_data: DotDict,
+        schema: DbManagerSchema,
         update_data: Dict[str, Any],
-        property: str,
+        history_entry: DbUserHistory,
+        property_key: str,
         is_self: bool,
         is_admin: bool,
         existence_check_property: Optional[str],
@@ -170,29 +229,30 @@ async def _update_groups(
         groups_pull_properties: Sequence[str],
         members_pull_properties: Sequence[str] = (),
 ) -> bool:
-    if not isinstance(update_data[property], list) or \
-            not all(isinstance(group, str) for group in update_data[property]):
-        raise HTTPException(400, f"{repr(property)} must be a string")
-    _validate_property_write(property, is_self, is_admin)
+    if not isinstance(update_data[property_key], list) or \
+            not all(isinstance(group, str) for group in update_data[property_key]):
+        raise HTTPException(400, f"{repr(property_key)} must be a string")
+    _validate_property_write(schema, property_key, is_self, is_admin)
 
     reset_user_cache = False
 
-    new_groups = update_data[property]
+    new_groups = update_data[property_key]
     new_groups_set = set(new_groups)
     if existence_check_property is None:
         if await async_user_group_collection.count_documents({'_id': {'$in': new_groups}}) != len(new_groups):
             raise HTTPException(400, "At least one group does not exist")
     else:
         if not new_groups_set.issubset(user_data[existence_check_property]):
-            raise HTTPException(400, f"{property} contains invalid group")
-    added_groups = list(new_groups_set.difference(user_data[property]))
-    removed_groups = list(set(user_data[property]).difference(new_groups))
-    user_data[property] = new_groups
+            raise HTTPException(400, f"{property_key} contains invalid group")
+    added_groups = list(new_groups_set.difference(user_data[property_key]))
+    removed_groups = list(set(user_data[property_key]).difference(new_groups))
+    user_data[property_key] = new_groups
     if added_groups:
         await async_user_group_collection.update_many(
             {'_id': {'$in': added_groups}},
             {'$addToSet': {groups_add_property: user_data['_id']}},
         )
+        history_entry.changes.append(DbChange(property=groups_add_property, value=f"Added {', '.join(added_groups)}"))
         reset_user_cache = True
     if removed_groups:
         await async_user_group_collection.update_many(
@@ -202,6 +262,10 @@ async def _update_groups(
                 for prop in groups_pull_properties
             }},
         )
+        history_entry.changes.extend(
+            DbChange(property=prop, value=f"Removed {', '.join(removed_groups)}")
+            for prop in groups_pull_properties
+        )
         for member_property_attr in members_pull_properties:
             member_property: List[str] = user_data.get(member_property_attr, [])
             for group in removed_groups:
@@ -210,32 +274,53 @@ async def _update_groups(
                 except ValueError:
                     pass
         reset_user_cache = True
-    del update_data[property]
+    del update_data[property_key]
     return reset_user_cache
+
+
+def apply_property_template(user_data: DotDict, prop: DbUserProperty):
+    assert "'''" not in prop.template, f"Invalid ''' in template: {prop.template}"
+    user_data[prop.key] = eval(
+        f"f'''{prop.template}'''",
+        {'make_username': make_username, 'config': config},
+        user_data,
+    )
 
 
 async def update_user(
         user_data: DotDict,
         update_data: Dict[str, Any],
+        author_user_id: str,
         is_new: bool = False,
         is_registering: bool = False,
         is_admin: bool = False,
         is_self: bool = False,
         no_registration: bool = False,
+        schema: DbManagerSchema = None,
 ):
-    if 'sub' in update_data or '_id' in update_data or 'picture' in update_data:
-        raise HTTPException(400, f"Cannot modify 'sub', '_id' or 'picture'")
+    if 'sub' in update_data or 'id' in update_data or '_id' in update_data or 'picture' in update_data:
+        raise HTTPException(400, f"Cannot modify 'sub', 'id', '_id' or 'picture'")
     was_active = user_data.get('active', False)
     reset_user_cache = False
+
+    if schema is None:
+        schema = await async_read_schema()
 
     if is_new:
         assert '_id' not in user_data
         user_data['_id'] = generate_token(48)
+    history_entry: DbUserHistory = DbUserHistory(
+        id=str(uuid4()),
+        user_id=user_data['_id'],
+        timestamp=datetime.utcnow(),
+        author_id=author_user_id,
+        changes=[],
+    )
 
     if 'password' in update_data:
         if not isinstance(update_data['password'], str):
             raise HTTPException(400, "'password' must be a string")
-        _validate_property_write('password', is_self, is_admin)
+        _validate_property_write(schema, 'password', is_self, is_admin)
         if is_self and not is_registering and user_data.get('password') is not None:
             if 'old_password' not in update_data:
                 raise HTTPException(400, f"Need {repr('old_password')} for setting password")
@@ -247,6 +332,7 @@ async def update_user(
         try:
             user_data['password'] = create_password(update_data['password'])
             del update_data['password']
+            history_entry.changes.append(DbChange(property='password', value="Set"))
         except PasswordLeakedException:
             raise HTTPException(400, "Password is leaked and cannot be used. See https://haveibeenpwned.com/")
 
@@ -255,20 +341,22 @@ async def update_user(
 
     if is_registering and update_data.get('email', user_data['email']) == user_data['email']:
         user_data['email_verified'] = True
+        del update_data['email']
     elif 'email' in update_data:
         if not isinstance(update_data['email'], str):
             raise HTTPException(400, "'email' must be a string")
-        _validate_property_write('email', is_self, is_admin)
+        _validate_property_write(schema, 'email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
         if await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
             raise HTTPException(400, "E-Mail address already in use, please use existing account")
         new_mail = update_data['email']
-        locale = update_data.get('locale', user_data.get('locale', config.oauth2.user.properties['locale'].default))
+        locale = update_data.get('locale', user_data.get('locale', schema.properties_by_key['locale'].default))
         if locale is None:
             locale = 'en_us'
-        tz = _get_tz(update_data.get('zoneinfo', user_data.get('zoneinfo')))
+        tz = schema.get_tz(update_data.get('zoneinfo', user_data.get('zoneinfo')))
         del update_data['email']
+        history_entry.changes.append(DbChange(property='email', value=new_mail))
         if is_new and not no_registration:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
@@ -276,7 +364,15 @@ async def update_user(
             user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
 
             async def send_mail():
-                await async_send_mail_register(user_data, token_valid_until, locale, tz)
+                await async_send_mail_register(
+                    user_data,
+                    schema,
+                    token_valid_until,
+                    locale,
+                    tz,
+                    author_id=author_user_id,
+                    history_entry=history_entry,
+                )
         elif not is_admin:
             token_valid_until = int(time.time() + config.manager.token_valid.email_set)
             user_data['email_verification_token'] = create_token(new_mail, token_valid_until)
@@ -285,7 +381,15 @@ async def update_user(
                 user_data['email_verified'] = False
 
             async def send_mail():
-                await async_send_mail_verify(locale, new_mail, user_data, token_valid_until, tz)
+                await async_send_mail_verify(
+                    locale,
+                    new_mail,
+                    user_data,
+                    token_valid_until,
+                    tz,
+                    author_id=author_user_id,
+                    history_entry=history_entry
+                )
         else:
             user_data['email'] = new_mail
             user_data['email_verified'] = False
@@ -297,9 +401,9 @@ async def update_user(
             access_tokens = [ValidateAccessToken.validate(val) for val in update_data['access_tokens']]
         except ValueError as err:
             raise HTTPException(400, str(err))
-        _validate_property_write('access_tokens', is_self, is_admin)
+        _validate_property_write(schema, 'access_tokens', is_self, is_admin)
         existing_access_tokens = [
-            UserPasswordAccessToken.validate(access_token)
+            DbUserPasswordAccessToken.validate(access_token)
             for access_token in user_data.get('access_tokens', [])
         ]
         existing_access_tokens_by_id = {
@@ -309,27 +413,42 @@ async def update_user(
         new_access_tokens = []
         for access_token in access_tokens:
             if access_token.id is not None:
-                store_token = existing_access_tokens_by_id.get(access_token.id)
+                store_token = existing_access_tokens_by_id.pop(access_token.id, None)
                 if store_token is None:
                     raise HTTPException(400, f"Invalid token ID {access_token.id}")
+                history_entry.changes.append(DbChange(
+                    property='access_tokens', value=f"Rename {store_token.description} -> {access_token.description}"
+                ))
                 store_token.description = access_token.description
                 if access_token.token is not None:
+                    history_entry.changes.append(DbChange(
+                        property='access_tokens', value=f"Regenerate {store_token.description}"
+                    ))
                     store_token.token = access_token.token
             else:
-                store_token = UserPasswordAccessToken(
+                store_token = DbUserPasswordAccessToken(
                     id=generate_token(24),
                     description=access_token.description,
                     token=access_token.token,
                 )
+                history_entry.changes.append(DbChange(
+                    property='access_tokens', value=f"Added {store_token.description}"
+                ))
             new_access_tokens.append(store_token)
+        history_entry.changes.extend(DbChange(
+            property='access_tokens', value=f"Deleted {deleted_token.description}"
+        ) for deleted_token in existing_access_tokens_by_id.values())
         del update_data['access_tokens']
         user_data['access_tokens'] = [access_token.dict() for access_token in new_access_tokens]
+        history_entry.changes.append(DbChange(property='access_tokens', value="Updated"))
 
     if 'groups' in update_data:
         if await _update_groups(
             user_data,
+            schema,
             update_data,
-            property='groups',
+            history_entry,
+            property_key='groups',
             is_self=is_self,
             is_admin=is_admin,
             existence_check_property=None,
@@ -346,8 +465,10 @@ async def update_user(
     if 'email_allowed_forward_groups' in update_data:
         await _update_groups(
             user_data,
+            schema,
             update_data,
-            property='email_allowed_forward_groups',
+            history_entry,
+            property_key='email_allowed_forward_groups',
             is_self=is_self,
             is_admin=is_admin,
             existence_check_property='groups',
@@ -359,8 +480,10 @@ async def update_user(
     if 'email_forward_groups' in update_data:
         await _update_groups(
             user_data,
+            schema,
             update_data,
-            property='email_forward_groups',
+            history_entry,
+            property_key='email_forward_groups',
             is_self=is_self,
             is_admin=is_admin,
             existence_check_property='email_allowed_forward_groups',
@@ -371,8 +494,10 @@ async def update_user(
     if 'email_postbox_access_groups' in update_data:
         await _update_groups(
             user_data,
+            schema,
             update_data,
-            property='email_postbox_access_groups',
+            history_entry,
+            property_key='email_postbox_access_groups',
             is_self=is_self,
             is_admin=is_admin,
             existence_check_property='groups',
@@ -381,13 +506,14 @@ async def update_user(
         )
 
     for key, value in update_data.items():
-        _validate_property_write(key, is_self, is_admin)
-        prop = config.oauth2.user.properties[key]
+        _validate_property_write(schema, key, is_self, is_admin)
+        prop = schema.properties_by_key[key]
         if prop.write_once and user_data.get(key) is not None:
             raise HTTPException(400, f"{repr(key)} can only be set once")
-        if not value and not prop.required and key in user_data:
+        if value is None and not prop.required and key in user_data:
             del user_data[key]
-        if prop.type in (UserPropertyType.str, UserPropertyType.multistr, UserPropertyType.token):
+            history_entry.changes.append(DbChange(property=key, value="<Deleted>"))
+        elif prop.type in (UserPropertyType.str, UserPropertyType.multistr, UserPropertyType.token):
             if not isinstance(value, str):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a string")
             if prop.template is not None:
@@ -397,6 +523,7 @@ async def update_user(
                 if not regex.fullmatch(value):
                     raise HTTPException(400, f"{repr(key)}={repr(value)} does not match pattern {repr(regex.pattern)}")
             user_data[key] = value
+            history_entry.changes.append(DbChange(property=key, value=value))
         elif prop.type == UserPropertyType.int:
             if isinstance(value, float):
                 if not value.is_integer():
@@ -405,16 +532,19 @@ async def update_user(
             if not isinstance(value, int):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not an integer")
             user_data[key] = value
+            history_entry.changes.append(DbChange(property=key, value=value))
         elif prop.type == UserPropertyType.bool:
             if not isinstance(value, bool):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a boolean")
             user_data[key] = value
+            history_entry.changes.append(DbChange(property=key, value=value))
         elif prop.type == UserPropertyType.datetime:
             if not isinstance(value, str):
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
             try:
                 parse_datetime(value)
                 user_data[key] = value
+                history_entry.changes.append(DbChange(property=key, value=value))
             except ValueError:
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
         elif prop.type == UserPropertyType.date:
@@ -423,6 +553,7 @@ async def update_user(
             try:
                 parse_date(value)
                 user_data[key] = value
+                history_entry.changes.append(DbChange(property=key, value=value))
             except ValueError:
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a datetime string")
         elif prop.type == UserPropertyType.enum:
@@ -433,41 +564,46 @@ async def update_user(
             if value not in values:
                 raise HTTPException(400, f"{repr(key)}={repr(value)} is not a valid enum value")
             user_data[key] = value
+            history_entry.changes.append(DbChange(property=key, value=value))
         else:
-            raise NotImplementedError(f"{repr(prop.type)}")
+            raise NotImplementedError(f"{key}: {repr(prop.type)}")
 
     # Set others to default
     if is_new or is_registering:
-        for key, value in config.oauth2.user.properties.items():
+        for key, value in schema.properties_by_key.items():
             if value.default is not None and key not in user_data:
                 user_data[key] = value.default
 
     # Activate the user after registration
     if is_registering:
         user_data['active'] = True
+        history_entry.changes.append(DbChange(property='active', value=True))
 
     # Apply all templates and validate required, when not active
     if user_data.get('active', False):
         # Validate that all required variables are present
-        for key, value in config.oauth2.user.properties.items():
+        for key, value in schema.properties_by_key.items():
             if value.required and user_data.get(key) is None:
                 raise HTTPException(400, f"Missing {repr(key)}")
         # Apply templates (they should not be required)
-        for key, value in config.oauth2.user.properties.items():
+        for key, value in schema.properties_by_key.items():
             if (
                     value.type == UserPropertyType.str and value.template is not None and
                     (not value.write_once or not user_data.get(key))
             ):
-                assert "'''" not in value.template, f"Invalid ''' in template: {value.template}"
-                user_data[key] = eval(
-                    f"f'''{value.template}'''",
-                    {'make_username': make_username, 'config': config},
-                    user_data,
-                )
+                apply_property_template(user_data, value)
+    else:
+        # Apply non-once templates
+        for key, value in schema.properties_by_key.items():
+            if (
+                    value.type == UserPropertyType.str and value.template is not None and
+                    not value.write_once
+            ):
+                apply_property_template(user_data, value)
 
     user_data['updated_at'] = int(time.time())
 
-    User.validate(user_data)
+    DbUser.validate(user_data)
 
     if is_new:
         await async_user_collection.insert_one(user_data)

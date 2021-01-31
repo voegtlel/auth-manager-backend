@@ -1,89 +1,16 @@
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Security, Body, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.security.base import SecurityBase
+from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from pydantic import BaseModel
-from starlette.requests import Request
-from starlette.status import HTTP_403_FORBIDDEN
 
 from user_manager.common.config import config
-from user_manager.common.mongo import async_client_collection, async_user_group_collection, async_user_collection
+from user_manager.common.mongo import async_user_group_collection, async_user_collection
 from user_manager.common.throttle import async_throttle_delay, async_throttle_failure
+from user_manager.oauth.api.ext_auth_base import AuthenticateClient
+
+client_auth = AuthenticateClient('*ext_mail')
 
 router = APIRouter()
-
-
-class ClientIdSecretQuery(SecurityBase):
-    def __init__(
-        self, *, scheme_name: Optional[str] = None, auto_error: bool = True
-    ):
-        self.scheme_name = scheme_name or self.__class__.__name__
-        self.auto_error = auto_error
-
-    async def __call__(self, request: Request) -> Optional[HTTPBasicCredentials]:
-        client_id: Optional[str] = request.query_params.get('client_id')
-        client_secret: Optional[str] = request.query_params.get('client_secret')
-        if not client_id or not client_secret:
-            if self.auto_error:
-                raise HTTPException(
-                    status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
-                )
-            else:
-                return None
-        return HTTPBasicCredentials(username=client_id, password=client_secret)
-
-
-class ClientIdSecretPost(SecurityBase):
-    def __init__(
-        self, *, scheme_name: Optional[str] = None, auto_error: bool = True
-    ):
-        self.scheme_name = scheme_name or self.__class__.__name__
-        self.auto_error = auto_error
-
-    async def __call__(self, request: Request) -> Optional[HTTPBasicCredentials]:
-        try:
-            request_json = await request.json()
-            client_id: Optional[str] = request_json.get('client_id')
-            client_secret: Optional[str] = request_json.get('client_secret')
-        except ValueError:
-            client_id = None
-            client_secret = None
-        if not client_id or not client_secret:
-            if self.auto_error:
-                raise HTTPException(
-                    status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
-                )
-            else:
-                return None
-        return HTTPBasicCredentials(username=client_id, password=client_secret)
-
-
-basic_security = HTTPBasic(auto_error=False)
-post_security = ClientIdSecretQuery(auto_error=False)
-
-
-class AuthenticateClient(SecurityBase):
-
-    async def __call__(
-            self,
-            basic_credentials: Optional[HTTPBasicCredentials] = Depends(HTTPBasic(auto_error=False)),
-            post_credentials: Optional[HTTPBasicCredentials] = Security(ClientIdSecretQuery(auto_error=False)),
-    ) -> dict:
-        credentials = post_credentials or basic_credentials
-
-        if not credentials:
-            raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
-            )
-        client_data = await async_client_collection.find_one(
-            {'_id': credentials.username, 'client_secret': credentials.password}
-        )
-        if client_data is None:
-            raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
-            )
-        return client_data
 
 
 def extract_email_user(email: str):
@@ -99,7 +26,7 @@ def extract_email_user(email: str):
     '/mail/email-exists/{email:path}',
     tags=['Extension: Mail'],
     response_model=None,
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def get_exists_email(
     email: str,
@@ -128,7 +55,7 @@ async def get_exists_email(
     '/mail/quota/{email:path}',
     tags=['Extension: Mail'],
     response_model=int,
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def get_quota(
     email: str,
@@ -163,7 +90,7 @@ async def get_quota(
     '/mail/postbox-exists/{email:path}',
     tags=['Extension: Mail'],
     response_model=None,
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def get_exists_postbox(
     email: str,
@@ -193,7 +120,7 @@ async def get_exists_postbox(
     '/mail/redirects/{email:path}',
     tags=['Extension: Mail'],
     response_model=List[str],
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def get_redirects(
     email: str,
@@ -253,7 +180,7 @@ class Credentials(BaseModel):
     '/mail/postbox/{email:path}',
     tags=['Extension: Mail'],
     response_model=None,
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def check_postbox_access(
     email: str,
@@ -301,7 +228,8 @@ async def check_postbox_access(
 
     retry_after, retry_delay = await async_throttle_failure(credentials.client_ip)
     raise HTTPException(
-        403, detail="User cannot access postbox (user not permitted or postbox does not exist)",
+        403,
+        detail="User cannot access postbox (user not permitted or postbox does not exist)",
         headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
     )
 
@@ -310,7 +238,7 @@ async def check_postbox_access(
     '/mail/send/{email:path}',
     tags=['Extension: Mail'],
     response_model=None,
-    dependencies=[Security(AuthenticateClient)],
+    dependencies=[Depends(client_auth)],
 )
 async def check_send_access(
         email: str,
@@ -355,6 +283,7 @@ async def check_send_access(
 
     retry_after, retry_delay = await async_throttle_failure(credentials.client_ip)
     raise HTTPException(
-        403, detail="User cannot send from email (user not permitted or email does not exist)",
+        403,
+        detail="User cannot send from email (user not permitted or email does not exist)",
         headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
     )

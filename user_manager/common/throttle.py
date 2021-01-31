@@ -9,7 +9,7 @@ from typing import Union, Optional, Tuple
 from starlette.requests import Request
 
 from user_manager.common.config import config
-from user_manager.common.models import IpLoginThrottle
+from user_manager.common.models import DbIpLoginThrottle
 from user_manager.common.mongo import async_ip_login_throttle_collection
 
 _max_throttle_count = int(
@@ -40,7 +40,7 @@ async def _async_throttle_delay(ip_address_str: str) -> Tuple[float, Optional[da
     throttle_data = await async_ip_login_throttle_collection.find_one({'_id': ip_address})
     if throttle_data is None:
         return 0, None
-    throttle = IpLoginThrottle.validate(throttle_data)
+    throttle = DbIpLoginThrottle.validate(throttle_data)
     next_retry = throttle.next_retry.replace(tzinfo=timezone.utc)
     delay = (next_retry - datetime.utcnow().replace(tzinfo=timezone.utc)).total_seconds()
     if delay > 0:
@@ -77,7 +77,7 @@ async def async_throttle_failure(ip_address_str: str) -> Tuple[str, str]:
     if throttle_data is None:
         delay = config.oauth2.login_throttler.base_delay
         next_retry = now + timedelta(seconds=delay)
-        throttle = IpLoginThrottle(
+        throttle = DbIpLoginThrottle(
             ip=ip_address,
             retries=1,
             last_retry=now,
@@ -86,7 +86,7 @@ async def async_throttle_failure(ip_address_str: str) -> Tuple[str, str]:
         )
         await async_ip_login_throttle_collection.insert_one(throttle.dict(exclude_none=True, by_alias=True))
     else:
-        throttle = IpLoginThrottle.validate(throttle_data)
+        throttle = DbIpLoginThrottle.validate(throttle_data)
         throttle.retries = min(throttle.retries + 1, _max_throttle_count)
         throttle.last_retry = now
         delay = min(

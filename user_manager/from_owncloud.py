@@ -2,6 +2,9 @@ import argparse
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
+from uuid import uuid4
+
 import sys
 import time
 from typing import Iterator, List, Optional, Any
@@ -10,7 +13,8 @@ from authlib.common.security import generate_token
 from pydantic.main import BaseModel
 
 from user_manager.common import mongo
-from user_manager.common.models import UserGroup, User
+from user_manager.common.models import DbUserGroup, DbUser, DbUserHistory, DbChange
+from user_manager.common.mongo import user_history_collection
 from user_manager.manager.api.user_helpers import normalize_username
 
 
@@ -230,6 +234,13 @@ if __name__ == '__main__':
             mongo.user_collection.update_one(
                 {'_id': existing_user['_id']}, {'$addToSet': {'groups': {'$each': user.groups}}}
             )
+            user_history_collection.insert_one(DbUserHistory(
+                id=str(uuid4()),
+                user_id=existing_user['_id'],
+                timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                author_id='batch',
+                changes=[DbChange(property='groups', value=f'Added {", ".join(user.groups)}')],
+            ).dict(by_alias=True, exclude_none=True))
             continue
 
         preferred_username = base_username = normalize_username(user.display_name)
@@ -249,7 +260,7 @@ if __name__ == '__main__':
         user_mapping[user.uid] = new_id
 
         users.append(
-            User(
+            DbUser(
                 id=new_id,
                 email=user.email,
                 active=True,
@@ -282,10 +293,11 @@ if __name__ == '__main__':
             )
             print(f"Update group {gid}")
         else:
-            groups.append(UserGroup(
+            groups.append(DbUserGroup(
                 id=gid,
                 group_name=group.display_name,
                 notes="Imported from OC",
+                group_type="team",
                 visible=True,
                 member_groups=[],
                 members=members,

@@ -2,20 +2,23 @@ from typing import Any, List
 
 from pydantic import BaseModel
 
-from user_manager.common.config import UserProperty
+from user_manager.common.models import UserGroupPropertyType
+from user_manager.manager.models.schema import UserProperty
 
 
-class UserPropertyWithKey(UserProperty):
-    key: str
-
-
-class UserPropertyWithValue(UserPropertyWithKey):
+class UserPropertyWithValue(UserProperty):
     value: Any
+
+
+class UserViewDataGroup(BaseModel):
+    title: str
+    type: UserGroupPropertyType
+    properties: List[UserPropertyWithValue]
 
 
 class UserViewData(BaseModel):
     user_id: str
-    properties: List[UserPropertyWithValue]
+    view_groups: List[UserViewDataGroup]
 
 
 class UserListProperty(BaseModel):
@@ -29,7 +32,9 @@ class UserListViewData(BaseModel):
 
 
 class UsersListViewData(BaseModel):
-    properties: List[UserPropertyWithKey]
+    view_id: str
+    view_name: str
+    properties: List[UserProperty]
     users: List[UserListViewData]
 
 
