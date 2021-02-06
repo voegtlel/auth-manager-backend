@@ -89,7 +89,6 @@ default_schema = DbManagerSchema(
             visible=AccessType.nobody,
             write_once=True,
             template="{preferred_username.lower()}@{config.oauth2.mail_domain.lower()}",
-            protected=True,
         ),
         DbUserProperty(
             key="phone_number",

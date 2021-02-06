@@ -6,8 +6,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import OperationFailure
 
 from user_manager.common.config import config
-from .models import DbSession, DbAuthorizationCode, DbToken, DbUser, DbClient, DbUserGroup, DbClientUserCache, DbIpLoginThrottle, \
-    DbManagerSchema, DbUserView, DbUserHistory
+from .models import DbSession, DbAuthorizationCode, DbToken, DbUser, DbClient, DbUserGroup, DbClientUserCache, \
+    DbIpLoginThrottle, DbManagerSchema, DbUserView, DbUserHistory, DbGroupMail
 from .models.base import BaseDocument
 
 db = MongoClient(config.mongo.uri).get_database()
@@ -56,6 +56,7 @@ user_collection = _collection(DbUser)
 user_view_collection = _collection(DbUserView)
 user_history_collection = _collection(DbUserHistory)
 user_picture_bucket = _gridfs('userPicture')
+user_group_mail_collection = _collection(DbGroupMail)
 
 _manager_schema_collection = _collection(DbManagerSchema)
 
@@ -72,6 +73,7 @@ async_user_collection = _async_collection(DbUser)
 async_user_view_collection = _async_collection(DbUserView)
 async_user_history_collection = _async_collection(DbUserHistory)
 async_user_picture_bucket = _async_gridfs('userPicture')
+async_group_mail_collection = _async_collection(DbGroupMail)
 
 _async_manager_schema_collection = _async_collection(DbManagerSchema)
 

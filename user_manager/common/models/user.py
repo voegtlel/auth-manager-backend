@@ -26,7 +26,6 @@ class DbUser(BaseDocument):
         IndexModel([('password_reset_token', HASHED)]),
         IndexModel([('groups', ASCENDING)]),
         IndexModel([('access_tokens.token', ASCENDING)]),
-        IndexModel([('email_alias', ASCENDING)]),
     ]
     __collection_name__ = 'user'
 
@@ -68,4 +67,3 @@ class DbUser(BaseDocument):
     has_postbox: Optional[bool]
     postbox_quota: Optional[int]
     forward_emails: Optional[bool]
-    email_alias: Optional[str]

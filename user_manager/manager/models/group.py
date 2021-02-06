@@ -29,6 +29,9 @@ class GroupBase(BaseModel):
     email_allowed_forward_members: List[str] = []
     email_postbox_access_members: List[str] = []
 
+    email_managed_mailing_list: bool = False
+    email_managed_mailing_list_notify_members: List[str] = []
+
 
 class GroupInRead(GroupBase):
     id: str

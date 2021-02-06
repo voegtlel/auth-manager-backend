@@ -11,6 +11,7 @@ from . import (
     ext_card_auth,
     ext_profiles,
     ext_mail,
+    ext_mailing_list,
 )
 
 router = APIRouter()
@@ -24,3 +25,4 @@ router.include_router(well_known.router)
 router.include_router(ext_card_auth.router)
 router.include_router(ext_profiles.router)
 router.include_router(ext_mail.router)
+router.include_router(ext_mailing_list.router)

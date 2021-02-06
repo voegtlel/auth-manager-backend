@@ -7,4 +7,5 @@ from .user import (
 from .user_view import UserViewInRead, UserViewInWrite, UserViewInList, UserViewGroup, UserFilter
 from .user_history import UserHistoryInList, UserHistoryChange
 from .group import GroupInRead, GroupInCreate, GroupInWrite, GroupInList
+from .group_mail import GroupMailInList
 from .client import ClientInList, ClientInRead, ClientAccessGroup, ClientInCreate, ClientInWrite

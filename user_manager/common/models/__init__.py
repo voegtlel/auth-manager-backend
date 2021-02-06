@@ -8,3 +8,4 @@ from .user import DbUser, DbUserPasswordAccessToken
 from .user_group import DbUserGroup
 from .user_view import DbUserView, DbUserViewGroup, DbUserFilter, UserGroupPropertyType, UserFilterOp
 from .user_history import DbUserHistory, DbChange
+from .group_mail import DbGroupMail

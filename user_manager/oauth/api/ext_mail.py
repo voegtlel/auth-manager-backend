@@ -1,6 +1,6 @@
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, Body, Response, Path
 from pydantic import BaseModel
 
 from user_manager.common.config import config
@@ -13,7 +13,7 @@ client_auth = AuthenticateClient('*ext_mail')
 router = APIRouter()
 
 
-def extract_email_user(email: str):
+def extract_email_user(email: str = Path(...)):
     if '@' not in email:
         raise HTTPException(400, "Missing '@' in address")
     mail_name, domain = email.split('@', 1)
@@ -29,7 +29,6 @@ def extract_email_user(email: str):
     dependencies=[Depends(client_auth)],
 )
 async def get_exists_email(
-    email: str,
     email_user: str = Depends(extract_email_user),
 ):
     """Inspect from a client if an email is registered."""
@@ -43,8 +42,8 @@ async def get_exists_email(
 
     if await async_user_collection.count_documents(
         {
-            'email_alias': email,
-            'enable_email': True,
+            'preferred_username': email_user,
+            'has_email_alias': True,
         }
     ) > 0:
         return Response(status_code=200)
@@ -58,7 +57,6 @@ async def get_exists_email(
     dependencies=[Depends(client_auth)],
 )
 async def get_quota(
-    email: str,
     email_user: str = Depends(extract_email_user),
 ) -> int:
     """Inspect from a client if an email is registered."""
@@ -75,7 +73,8 @@ async def get_quota(
 
     user = await async_user_collection.find_one(
         {
-            'email_alias': email,
+            'preferred_username': email_user,
+            'has_email_alias': True,
             'enable_postbox': True,
         },
         projection={'postbox_quota': 1, '_id': 0}
@@ -108,7 +107,8 @@ async def get_exists_postbox(
 
     if await async_user_collection.count_documents(
         {
-            'email_alias': email.lower(),
+            'preferred_username': email_user,
+            'has_email_alias': True,
             'enable_postbox': True,
         }
     ) > 0:
@@ -143,11 +143,11 @@ async def get_redirects(
         members = []
         if uids:
             async for user in async_user_collection.find({'_id': {'$in': uids}}, projection={
-                'has_email_alias': 1, 'forward_emails': 1, 'email': 1, 'email_alias': 1, '_id': 0,
+                'has_email_alias': 1, 'forward_emails': 1, 'email': 1, '_id': 0,
             }):
-                if user.get('has_email_alias', False) and 'email_alias' in user:
+                if user.get('has_email_alias', False):
                     # Will also forward it in case forwarding is also enabled
-                    members.append(user['email_alias'])
+                    members.append(f"{user['preferred_username']}@{config.oauth2.mail_domain}")
                 elif user.get('forward_emails', False) and 'email' in user:
                     members.append(user['email'])
         if group_forwards['enable_postbox']:
@@ -156,7 +156,8 @@ async def get_redirects(
 
     user_forwarding = await async_user_collection.find_one(
         {
-            'email_alias': email.lower(),
+            'preferred_username': email.lower(),
+            'has_email_alias': True,
         },
         projection={'forward_emails': 1, 'email': 1, 'has_postbox': 1, '_id': 0}
     )
@@ -183,7 +184,6 @@ class Credentials(BaseModel):
     dependencies=[Depends(client_auth)],
 )
 async def check_postbox_access(
-    email: str,
     credentials: Credentials = Body(...),
     email_user: str = Depends(extract_email_user),
 ):
@@ -201,7 +201,7 @@ async def check_postbox_access(
     if credentials.username is not None:
         search['username'] = credentials.username
     user = await async_user_collection.find_one(
-        search, projection={'_id': 1, 'email_alias': 1, 'has_email_alias': 1, 'has_postbox': 1}
+        search, projection={'_id': 1, 'preferred_username': 1, 'has_email_alias': 1, 'has_postbox': 1}
     )
 
     if user is None:
@@ -210,7 +210,7 @@ async def check_postbox_access(
             403, detail="User not authorized", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
     if user.get('has_postbox', False) and user.get('has_email_alias', False) and \
-            user.get('email_alias') == email.lower():
+            user.get('preferred_username') == email_user:
         # User is accessing it's own postbox
         return Response(status_code=200)
 
@@ -241,7 +241,6 @@ async def check_postbox_access(
     dependencies=[Depends(client_auth)],
 )
 async def check_send_access(
-        email: str,
         credentials: Credentials = Body(...),
         email_user: str = Depends(extract_email_user),
 ):
@@ -257,13 +256,15 @@ async def check_send_access(
     }
     if credentials.username is not None:
         search['username'] = credentials.username
-    user = await async_user_collection.find_one(search, projection={'_id': 1, 'email_alias': 1, 'has_email_alias': 1})
+    user = await async_user_collection.find_one(
+        search, projection={'_id': 1, 'preferred_username': 1, 'has_email_alias': 1}
+    )
     if user is None:
         retry_after, retry_delay = await async_throttle_failure(credentials.client_ip)
         raise HTTPException(
             403, detail="User not authorized", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
-    if user.get('has_email_alias', False) and user.get('email_alias') == email.lower():
+    if user.get('has_email_alias', False) and user.get('preferred_username') == email_user:
         # User is sending from it's own alias
         return Response(status_code=200)
 
