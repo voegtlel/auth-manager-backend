@@ -62,6 +62,12 @@ async def get_picture_meta(
 @router.get(
     '/picture/{picture_id}',
     tags=['User Manager: User Picture'],
+    responses={
+        200: {
+            "content": {"image/*": {}},
+            "description": "The picture",
+        },
+    },
 )
 async def get_picture(
         picture_id: str,

@@ -124,7 +124,6 @@ async def _get_user_view(
     if view_data is None:
         raise HTTPException(400, f"Invalid view {view_name}")
     view: DbUserView = DbUserView.validate(view_data)
-    user_data['id'] = user_data['_id']
 
     return UserViewData(
         user_id='new' if user_data is None else user_data['_id'],
@@ -180,6 +179,7 @@ async def get_user(
     is_admin = 'admin' in user['roles']
     is_self = user.sub == user_id
     user_data = DotDict.from_obj(await async_user_collection.find_one({'_id': user_id}))
+    user_data['id'] = user_data['_id']
     return await _get_user_view('all', is_self, is_admin, user_data=user_data)
 
 
@@ -198,6 +198,7 @@ async def get_register_user(
     }))
     if user_data is None:
         raise HTTPException(401, "Invalid token")
+    user_data['id'] = user_data['_id']
     return await _get_user_view('registration', is_self=True, is_admin=False, user_data=user_data)
 
 

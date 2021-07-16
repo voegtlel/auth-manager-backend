@@ -586,6 +586,7 @@ default_views = [
             ),
             DbUserViewGroup(
                 title="Groups",
+                type=UserGroupPropertyType.groups,
                 user_properties=[
                     "groups",
                     "email_allowed_forward_groups",

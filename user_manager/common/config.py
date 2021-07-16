@@ -152,6 +152,8 @@ class OAuth2Config(BaseModel):
 
     password: Dict[str, Any]
 
+    mail_storage_path: Optional[str]
+
 
 class ManagerTokenValid(BaseModel):
     registration: int = 24 * 60 * 60

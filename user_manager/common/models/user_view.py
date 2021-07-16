@@ -81,6 +81,7 @@ class UserGroupPropertyType(str, Enum):
     default = 'default'
     email = 'email'
     password = 'password'
+    groups = 'groups'
 
 
 class DbUserViewGroup(BaseSubDocument):

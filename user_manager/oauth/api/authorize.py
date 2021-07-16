@@ -62,6 +62,7 @@ class OAuthAuthorizeRequestQueryParams:
     tags=['OAuth2 Provider: Authorize'],
     responses={
         302: {'description': "Redirect to authentication page or redirect_uri if session is valid"},
+        200: {'content': {'application/json': {}, 'text/html': {}}},
         400: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },

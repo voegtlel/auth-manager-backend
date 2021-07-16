@@ -47,7 +47,7 @@ async def get_view(view_id: UUID) -> UserViewInRead:
     response_model=UserViewInRead,
     dependencies=[Depends(Authentication())],
 )
-async def get_view(group_id: str) -> UserViewInRead:
+async def get_view_by_group(group_id: str) -> UserViewInRead:
     """Gets one view by the group id."""
     user_view_data = await async_user_view_collection.find_one({'group_id': group_id})
     if user_view_data is None:

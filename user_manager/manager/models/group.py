@@ -15,6 +15,7 @@ class GroupInList(BaseModel):
 
 class GroupBase(BaseModel):
     group_name: str
+    group_type: str
     notes: Optional[str]
 
     visible: bool
@@ -31,6 +32,8 @@ class GroupBase(BaseModel):
 
     email_managed_mailing_list: bool = False
     email_managed_mailing_list_notify_members: List[str] = []
+    email_managed_mailing_list_forward_to_notifiers: bool = False
+    email_managed_mailing_list_send_notification_to_sender: bool = False
 
 
 class GroupInRead(GroupBase):
