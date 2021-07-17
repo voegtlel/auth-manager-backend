@@ -278,7 +278,7 @@ if __name__ == '__main__':
                 family_name=family_name,
                 # This token is not usable, but it enforces that the user reviews the user credentials before logging in
                 registration_token='imported',
-            ).dict(exclude_none=True, by_alias=True)
+            ).document()
         )
         print("Create", users[-1])
 
@@ -301,7 +301,7 @@ if __name__ == '__main__':
                 visible=True,
                 member_groups=[],
                 members=members,
-            ).dict(exclude_none=True, by_alias=True))
+            ).document())
             print("Create group", groups[-1])
 
     if users:

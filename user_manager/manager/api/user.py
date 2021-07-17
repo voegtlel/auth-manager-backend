@@ -66,7 +66,7 @@ async def _get_view_users(
     view_data = await async_user_view_collection.find_one({'_id': view_id})
     if view_data is None:
         raise HTTPException(404, f"View {view_id} not existing")
-    view = DbUserView.validate(view_data)
+    view = DbUserView.validate_document(view_data)
     if view.filter is not None:
         users_data = async_user_collection.find(view.filter.to_mongodb())
     else:
@@ -123,7 +123,7 @@ async def _get_user_view(
     view_data = await async_user_view_collection.find_one({'_id': view_name})
     if view_data is None:
         raise HTTPException(400, f"Invalid view {view_name}")
-    view: DbUserView = DbUserView.validate(view_data)
+    view: DbUserView = DbUserView.validate_document(view_data)
 
     return UserViewData(
         user_id='new' if user_data is None else user_data['_id'],
@@ -459,7 +459,7 @@ async def upload_picture(
         raise HTTPException(401)
     if user_data is None:
         raise HTTPException(404)
-    mod_user = DbUser.validate(user_data)
+    mod_user = DbUser.validate_document(user_data)
     await async_user_history_collection.insert_one(DbUserHistory(
         id=str(uuid4()),
         user_id=mod_user.id,

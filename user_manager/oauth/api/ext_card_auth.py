@@ -41,7 +41,7 @@ async def authorize_card(
     user_data = await async_user_collection.find_one({'card_id': card.card_id})
     if user_data is None:
         raise HTTPException(404, "Unknown card")
-    user = DbUser.validate(user_data)
+    user = DbUser.validate_document(user_data)
     if not user.active:
         raise HTTPException(400, "User not active")
 

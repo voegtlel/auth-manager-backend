@@ -31,7 +31,7 @@ async def get_groups(
     else:
         group_filter = {'visible': True}
     return [
-        GroupInList.validate(DbUserGroup.validate(group))
+        GroupInList.validate(DbUserGroup.validate_document(group))
         async for group in async_user_group_collection.find(group_filter)
     ]
 
@@ -62,14 +62,14 @@ async def create_group(
     """Creates a group."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_group = DbUserGroup.validate(group_data)
+    new_group = DbUserGroup.validate_override(group_data, id=str(uuid4()))
     new_group.id = new_group.id.lower()
     if not new_group.enable_email:
         new_group.email_forward_members = []
         new_group.email_allowed_forward_members = []
     if not new_group.enable_postbox:
         new_group.email_postbox_access_members = []
-    await async_user_group_collection.insert_one(new_group.dict(exclude_none=True, by_alias=True))
+    await async_user_group_collection.insert_one(new_group.document())
     timestamp = int(time.time())
     history_entries: List[DbUserHistory] = []
     if new_group.members:
@@ -151,7 +151,7 @@ async def get_group(
     group_data = await async_user_group_collection.find_one({'_id': group_id})
     if group_data is None:
         raise HTTPException(404)
-    return GroupInRead.validate(DbUserGroup.validate(group_data))
+    return GroupInRead.validate(DbUserGroup.validate_document(group_data))
 
 
 async def _update_groups(
@@ -244,7 +244,7 @@ async def update_group(
     group_data = await async_user_group_collection.find_one({'_id': group_id})
     if group_data is None:
         raise HTTPException(404)
-    group = DbUserGroup.validate(group_data)
+    group = DbUserGroup.validate_document(group_data)
 
     if not group_update.enable_email:
         group_update.email_forward_members = []
@@ -304,7 +304,7 @@ async def update_group(
     group.update_from(group_update)
     result = await async_user_group_collection.replace_one(
         {'_id': group_id},
-        group.dict(exclude_none=True, by_alias=True),
+        group.document(),
     )
     if result.matched_count != 1:
         raise HTTPException(404)
@@ -347,7 +347,7 @@ async def delete_group(
     delete_group_data = await async_user_group_collection.find_one({'_id': group_id})
     if delete_group_data is None:
         raise HTTPException(404)
-    delete_group = DbUserGroup.validate(delete_group_data)
+    delete_group = DbUserGroup.validate_document(delete_group_data)
     await _merge_update_user_history([
         DbUserHistory(
             id=str(uuid4()),

@@ -70,10 +70,10 @@ async def update_view(
     user_view_data = await async_user_view_collection.find_one({'_id': view_id})
     if user_view_data is None:
         raise HTTPException(404, f"View {view_id} not found")
-    db_user_view = DbUserView.validate(user_view_data)
+    db_user_view = DbUserView.validate_document(user_view_data)
 
     db_user_view.name = view.name
-    db_user_view.filter = (None if view.filter is None else DbUserFilter.validate(view.filter))
+    db_user_view.filter = (None if view.filter is None else DbUserFilter.validate_document(view.filter))
     db_user_view.list_properties = view.list_properties
     db_user_view.view_groups = [
         DbUserViewGroup(
@@ -83,4 +83,4 @@ async def update_view(
         )
         for view_group in view.view_groups
     ]
-    await async_user_view_collection.replace_one({'_id': view_id}, db_user_view.dict(exclude_none=True, by_alias=True))
+    await async_user_view_collection.replace_one({'_id': view_id}, db_user_view.document())

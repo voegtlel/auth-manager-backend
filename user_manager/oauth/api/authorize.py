@@ -139,7 +139,7 @@ async def authorize(
             403, "Invalid E-Mail or Password", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
 
-    user = DbUser.validate(user_data)
+    user = DbUser.validate_document(user_data)
     if new_hash is not None:
         await async_user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
         user.password = new_hash
@@ -194,7 +194,7 @@ async def authorize(
                 expires_in=expires_in,
                 expiration_time=datetime.utcnow() + timedelta(seconds=expires_in),
             )
-            await async_session_collection.insert_one(sess.dict(exclude_none=True, by_alias=True))
+            await async_session_collection.insert_one(sess.document())
             update_session_sid(resp, sess.id)
         update_session_state(resp, oauth_request.user)
         return resp

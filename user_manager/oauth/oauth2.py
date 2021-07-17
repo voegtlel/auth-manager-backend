@@ -45,7 +45,6 @@ from user_manager.common.mongo import authorization_code_collection, token_colle
 from . import oauth2_key
 from .user_helper import UserWithRoles
 
-
 USERS_SCOPE = '*users'
 
 
@@ -131,7 +130,7 @@ def save_authorization_code(code: str, request: TypedRequest):
         auth_time=int(time.time()),
         expiration_time=datetime.utcnow() + timedelta(seconds=config.oauth2.token_expiration.authorization_code),
     )
-    authorization_code_collection.insert_one(item.dict(exclude_none=True, by_alias=True))
+    authorization_code_collection.insert_one(item.document())
     return item
 
 
@@ -184,13 +183,10 @@ class UserInfoMixin(object):
             if prop.type == UserPropertyType.picture:
                 value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
-                filter: dict = {'_id': {'$in': user_data['groups']}, 'visible': True, }
-                if group_type is not None:
-                    filter['group_type'] = group_type
                 value = [
                     group['_id']
                     for group in user_group_collection.find(
-                        {'_id': {'$in': user_data['groups']}, 'visible': True},
+                        {'_id': {'$in': value}, 'visible': True},
                         projection={'_id': 1}
                     )
                 ]
@@ -212,13 +208,10 @@ class UserInfoMixin(object):
             if prop.type == UserPropertyType.picture:
                 value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
-                filter: dict = {'_id': {'$in': user_data['groups']}, 'visible': True, }
-                if group_type is not None:
-                    filter['group_type'] = group_type
                 value = [
                     group['_id']
                     async for group in async_user_group_collection.find(
-                        {'_id': {'$in': user_data['groups']}, 'visible': True},
+                        {'_id': {'$in': value}, 'visible': True},
                         projection={'_id': 1}
                     )
                 ]
@@ -241,7 +234,7 @@ class AuthorizationCodeGrant(_AuthorizationCodeGrant):
         auth_code_data = authorization_code_collection.find_one({'_id': code, 'client_id': client.id})
         if auth_code_data is None:
             return None
-        auth_code = DbAuthorizationCode.validate(auth_code_data)
+        auth_code = DbAuthorizationCode.validate_document(auth_code_data)
         if auth_code.is_expired():
             return None
         return auth_code
@@ -265,7 +258,7 @@ class ResourceOwnerPasswordCredentialsGrant(_ResourceOwnerPasswordCredentialsGra
         user_data = user_collection.find_one({'email': username, 'access_tokens.token': password, 'active': True})
         if user_data is None:
             return None
-        return UserWithRoles.load_groups(DbUser.validate(user_data), self.client.id)
+        return UserWithRoles.load_groups(DbUser.validate_document(user_data), self.client.id)
 
 
 class OpenIDCode(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDCode):
@@ -279,8 +272,11 @@ class OpenIDImplicitGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _Open
 class OpenIDHybridGrant(UserInfoMixin, ExistsNonceMixin, JwtConfigMixin, _OpenIDHybridGrant):
     jwt_token_expiration = config.oauth2.token_expiration.implicit
 
-    def create_authorization_code(self, client: DbClient, grant_user: UserWithRoles, request: TypedRequest):
-        return save_authorization_code(generate_token(config.oauth2.authorization_code_length), request)
+    def generate_authorization_code(self) -> str:
+        return generate_token(config.oauth2.authorization_code_length)
+
+    def save_authorization_code(self, code: str, request: TypedRequest):
+        return save_authorization_code(code, request)
 
 
 class RefreshTokenGrant(_RefreshTokenGrant):
@@ -291,7 +287,7 @@ class RefreshTokenGrant(_RefreshTokenGrant):
         token_data = token_collection.find_one({'refresh_token': refresh_token})
         if token_data is None:
             return None
-        auth_code = DbToken.validate(token_data)
+        auth_code = DbToken.validate_document(token_data)
         if auth_code.is_expired():
             return None
         return auth_code
@@ -310,7 +306,7 @@ def save_token(token: Dict[str, Any], request: TypedRequest):
     else:
         user_id = None
     now = int(time.time())
-    token_data = DbToken.validate({
+    token_data = DbToken.validate_document({
         'client_id': request.client.id,
         'user_id': user_id,
         'issued_at': now,
@@ -319,7 +315,7 @@ def save_token(token: Dict[str, Any], request: TypedRequest):
         'auth_time': request.credential.get_auth_time(),
         **token
     })
-    token_collection.insert_one(token_data.dict(exclude_none=True, by_alias=True))
+    token_collection.insert_one(token_data.document())
     return token_data
 
 
@@ -327,14 +323,14 @@ def query_client(client_id: str):
     client_data = client_collection.find_one({'_id': client_id})
     if client_data is None:
         return None
-    return DbClient.validate(client_data)
+    return DbClient.validate_document(client_data)
 
 
 async def async_query_client(client_id: str):
     client_data = await async_client_collection.find_one({'_id': client_id})
     if client_data is None:
         return None
-    return DbClient.validate(client_data)
+    return DbClient.validate_document(client_data)
 
 
 def token_generator(*_):
@@ -402,7 +398,7 @@ class BearerTokenValidator(_BearerTokenValidator):
         token_data = token_collection.find_one({'_id': token_string})
         if token_data is None:
             return None
-        token = DbToken.validate(token_data)
+        token = DbToken.validate_document(token_data)
         if client_user_cache_collection.count_documents({
             'client_id': token.client_id,
             'user_id': token.user_id,
@@ -511,7 +507,7 @@ class RevocationEndpoint:
             token_data = await async_token_collection.find_one({'refresh_token': raw_token})
         if token_data is None:
             return Response()
-        token = DbToken.validate(token_data)
+        token = DbToken.validate_document(token_data)
         try:
             if request.client_id is None:
                 request.data['client_id'] = token.client_id
@@ -520,7 +516,9 @@ class RevocationEndpoint:
             await run_in_threadpool(
                 authorization.authenticate_client, request, ["none", "client_secret_basic", "client_secret_post"]
             )
-            await async_token_collection.update_one({'_id': token.access_token}, {'$set': {'revoked': True}})
+            # await async_token_collection.update_one({'_id': token.access_token}, {'$set': {'revoked': True}})
+            # token_collection.update_one({'_id': credential.access_token}, {'revoked': True})
+            await async_token_collection.delete_one({'_id': token.access_token})
             return Response()
         except OAuth2Error as error:
             return authorization.handle_error_response(request, error)

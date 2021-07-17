@@ -94,7 +94,7 @@ def _create_user_cache_for_user_client(user_data: DbUser, client_id: str) -> Opt
             groups=list(effective_groups),
             roles=client_user_roles,
             last_modified=user_data.updated_at,
-        ).dict(exclude_none=True, by_alias=True)
+        ).document()
         client_user_cache_collection.insert_one(cache_entry)
         return cache_entry
     return None
@@ -128,7 +128,7 @@ async def _async_create_user_cache_for_user_client(user_data: DbUser, client_id:
             groups=list(effective_groups),
             roles=client_user_roles,
             last_modified=user_data.updated_at,
-        ).dict(exclude_none=True, by_alias=True)
+        ).document()
         await async_client_user_cache_collection.insert_one(cache_entry)
         return cache_entry
     return None
@@ -144,7 +144,7 @@ class UserWithRoles(BaseModel):
         user_data = user_collection.find_one({'_id': user_id})
         if user_data is None:
             return None
-        user = DbUser.validate(user_data)
+        user = DbUser.validate_document(user_data)
         if not user.active:
             raise HTTPException(401, "User inactive")
         return UserWithRoles.load_groups(user, client_id)
@@ -168,7 +168,7 @@ class UserWithRoles(BaseModel):
         user_data = await async_user_collection.find_one({'_id': user_id})
         if user_data is None:
             return None
-        user = DbUser.validate(user_data)
+        user = DbUser.validate_document(user_data)
         if not user.active:
             raise HTTPException(401, "User inactive")
         return await UserWithRoles.async_load_groups(user, client_id)
@@ -197,7 +197,9 @@ class UserWithRoles(BaseModel):
         client_user_groups = [access_group['group'] for access_group in client_groups]
 
         all_client_group_maps = await _async_resolve_groups(client_user_groups)
-        all_client_groups = set(group for groups in all_client_group_maps.values() for group in groups)
+        all_client_groups = set(group for groups in all_client_group_maps.values() for group in groups) | set(
+            all_client_group_maps.keys()
+        )
 
-        async for user_data in async_user_collection.find({'groups': {'$in': all_client_groups}}):
-            yield DbUser.validate(user_data)
+        async for user_data in async_user_collection.find({'groups': {'$in': list(all_client_groups)}}):
+            yield DbUser.validate_document(user_data)

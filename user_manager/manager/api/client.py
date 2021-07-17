@@ -1,4 +1,5 @@
 from typing import List
+from uuid import uuid4
 
 from authlib.oidc.core import UserInfo
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,7 +25,7 @@ async def get_clients(
     if 'admin' not in user['roles']:
         raise HTTPException(401)
     return [
-        ClientInList.validate(DbClient.validate(client)) async for client in async_client_collection.find()
+        ClientInList.validate(DbClient.validate_document(client)) async for client in async_client_collection.find()
     ]
 
 
@@ -40,8 +41,8 @@ async def create_client(
     """Creates a client."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_client = DbClient.validate(client_data)
-    await async_client_collection.insert_one(new_client.dict(exclude_none=True, by_alias=True))
+    new_client = DbClient.validate_override(client_data, id=str(uuid4()))
+    await async_client_collection.insert_one(new_client.document())
 
 
 @router.get(
@@ -58,7 +59,7 @@ async def get_client(
     client_data = await async_client_collection.find_one({'_id': client_id})
     if client_data is None:
         raise HTTPException(404)
-    return ClientInRead.validate(DbClient.validate(client_data))
+    return ClientInRead.validate(DbClient.validate_document(client_data))
 
 
 @router.put(
@@ -76,11 +77,11 @@ async def update_client(
     if await async_client_collection.count_documents({'_id': client_id}) != 1:
         raise HTTPException(404)
 
-    client = DbClient.validate(client_update)
+    client = DbClient.validate_document(client_update)
     await async_client_user_cache_collection.delete_many({'client_id': client_id})
     result = await async_client_collection.replace_one(
         {'_id': client_id},
-        client.dict(exclude_none=True, by_alias=True),
+        client.document(),
     )
     if result.matched_count != 1:
         raise HTTPException(404)

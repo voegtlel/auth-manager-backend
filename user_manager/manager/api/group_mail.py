@@ -32,7 +32,7 @@ async def get_group_mails(
     if group is None:
         raise HTTPException(404, "No access to group or group does not exist")
     return [
-        GroupMailInList.validate(DbGroupMail.validate(group_mail))
+        GroupMailInList.validate(DbGroupMail.validate_document(group_mail))
         async for group_mail in async_group_mail_collection.find({'group_id': group_id})
     ]
 
@@ -59,5 +59,5 @@ async def get_group_mail(
     mail_entry = await async_group_mail_collection.find_one({'group_id': group_id, '_id': mail_id})
     if mail_entry is None:
         raise HTTPException(404, "Mail does not exist")
-    mail = DbGroupMail.validate(mail_entry)
+    mail = DbGroupMail.validate_document(mail_entry)
     return FileResponse(mail.mail_path)

@@ -79,20 +79,20 @@ _async_manager_schema_collection = _async_collection(DbManagerSchema)
 
 
 async def async_read_schema() -> DbManagerSchema:
-    return DbManagerSchema.validate(await _async_manager_schema_collection.find_one({'_id': 0}))
+    return DbManagerSchema.validate_document(await _async_manager_schema_collection.find_one({'_id': 0}))
 
 
 def read_schema() -> DbManagerSchema:
-    return DbManagerSchema.validate(_manager_schema_collection.find_one({'_id': 0}))
+    return DbManagerSchema.validate_document(_manager_schema_collection.find_one({'_id': 0}))
 
 
 async def async_update_schema(new_schema: DbManagerSchema, upsert: bool = False):
-    await _async_manager_schema_collection.update_one(
-        {'_id': 0}, new_schema.dict(exclude_none=True, by_alias=True), upsert=upsert
+    await _async_manager_schema_collection.replace_one(
+        {'_id': 0}, new_schema.document(), upsert=upsert
     )
 
 
 def update_schema(new_schema: DbManagerSchema, upsert: bool = False):
     _manager_schema_collection.replace_one(
-        {'_id': 0}, new_schema.dict(exclude_none=True, by_alias=True), upsert=upsert
+        {'_id': 0}, new_schema.document(), upsert=upsert
     )

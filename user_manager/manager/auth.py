@@ -10,6 +10,14 @@ router = APIRouter()
 
 
 class StarletteRemoteApp(_StarletteRemoteApp):
+
+    # Hotfix patch
+    async def _fetch_server_metadata(self, url):
+        async with self._get_oauth_client() as client:
+            from httpx import USE_CLIENT_DEFAULT
+            resp = await client.request('GET', url, auth=USE_CLIENT_DEFAULT, withhold_token=True)
+            return resp.json()
+
     async def parse_id_token_raw(self, token: str) -> UserInfo:
         return await self._parse_id_token({'id_token': token, 'access_token': True}, nonce=None, claims_options=None)
 

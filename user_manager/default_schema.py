@@ -190,7 +190,8 @@ default_schema = DbManagerSchema(
             title="Profile URL",
             type=UserPropertyType.str,
             visible=AccessType.nobody,
-            template="{config.oauth2.base_url}/profiles/{preferred_username}",
+            write_once=True,
+            template="{config.oauth2.base_url}/profiles/{_id}",
             protected=True,
         ),
         DbUserProperty(
@@ -444,6 +445,7 @@ default_schema = DbManagerSchema(
                 DbUserScopeProperty(user_property="picture"),
                 DbUserScopeProperty(user_property="email"),
                 DbUserScopeProperty(user_property="phone_number"),
+                DbUserScopeProperty(key="teams", user_property="groups", group_type="team"),
             ],
         ),
         DbUserScope(
@@ -653,6 +655,7 @@ default_views = [
                 user_properties=[
                     "email",
                     "active",
+                    "password",
                 ],
             ),
             DbUserViewGroup(

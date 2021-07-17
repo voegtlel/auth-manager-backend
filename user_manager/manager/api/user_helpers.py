@@ -403,7 +403,7 @@ async def update_user(
             raise HTTPException(400, str(err))
         _validate_property_write(schema, 'access_tokens', is_self, is_admin)
         existing_access_tokens = [
-            DbUserPasswordAccessToken.validate(access_token)
+            DbUserPasswordAccessToken.validate_document(access_token)
             for access_token in user_data.get('access_tokens', [])
         ]
         existing_access_tokens_by_id = {
@@ -603,7 +603,7 @@ async def update_user(
 
     user_data['updated_at'] = int(time.time())
 
-    DbUser.validate(user_data)
+    DbUser.validate_document(user_data)
 
     if is_new:
         await async_user_collection.insert_one(user_data)

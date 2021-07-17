@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     update_schema(default_schema.default_schema, upsert=True)
     mongo.user_view_collection.insert_many([
-        view.dict(exclude_none=True, by_alias=True) for view in default_schema.default_views
+        view.document() for view in default_schema.default_views
     ])
 
     mongo.client_collection.insert_one(DbClient(
@@ -39,21 +39,21 @@ if __name__ == '__main__':
         response_type=['token', 'code'],
         grant_type=['authorization_code', 'refresh_token'],
         access_groups=[DbAccessGroup(group='admin', roles=['admin']), DbAccessGroup(group='users', roles=['edit_self'])],
-    ).dict(exclude_none=True, by_alias=True))
+    ).document())
     mongo.user_group_collection.insert_one(DbUserGroup(
         id='users',
         visible=False,
         group_name="All Users",
         members=[admin_id],
         group_type="management",
-    ).dict(exclude_none=True, by_alias=True))
+    ).document())
     mongo.user_group_collection.insert_one(DbUserGroup(
         id='admin',
         visible=False,
         group_name="Admins",
         members=[admin_id],
         group_type="management",
-    ).dict(exclude_none=True, by_alias=True))
+    ).document())
     registration_token = create_token(admin_id, now + config.manager.token_valid.registration)
     mongo.user_collection.insert_one(DbUser(
         id=admin_id,
@@ -63,6 +63,6 @@ if __name__ == '__main__':
         groups=['users', 'admin'],
         updated_at=now,
         registration_token=registration_token,
-    ).dict(exclude_none=True, by_alias=True))
+    ).document())
     print("Use the following link to register the administrator:")
     print(f"{config.manager.frontend_base_url}/register/{registration_token}")

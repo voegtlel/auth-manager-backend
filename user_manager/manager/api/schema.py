@@ -34,7 +34,7 @@ async def update_schema(
     is_admin = 'admin' in user['roles']
     if not is_admin:
         raise HTTPException(401)
-    new_schema = DbManagerSchema.validate(schema)
+    new_schema = DbManagerSchema.validate_override(schema, id=0)
     existing_schema = await async_read_schema()
 
     removed_properties = [
@@ -60,10 +60,11 @@ async def update_schema(
         prop.key in existing_schema.properties_by_key and
         existing_schema.properties_by_key[prop.key].template != prop.template and not prop.write_once
     ]
-    await async_user_collection.update_many(
-        {'$or': [{prop.key: {'$exists': True}} for prop in removed_properties]},
-        {'$unset': {prop.key for prop in removed_properties}},
-    )
+    if removed_properties:
+        await async_user_collection.update_many(
+            {'$or': [{prop.key: {'$exists': True}} for prop in removed_properties]},
+            {'$unset': {prop.key: 1 for prop in removed_properties}},
+        )
     if modified_template_props:
         async for user in async_user_collection.find():
             user_data = DotDict(user)

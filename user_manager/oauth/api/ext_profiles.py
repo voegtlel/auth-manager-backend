@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter
 from starlette.requests import Request
@@ -34,6 +34,7 @@ async def get_profile(
     if origin is not None:
         origin_response = await request_origin_verifier.create_response(oauth_request, origin)
         if origin_response is not None:
+            allow_all_get_cors.augment(request, origin_response)
             return origin_response
     response = await other_user_inspection.create_response(oauth_request, user_id)
     allow_all_get_cors.augment(request, response)
@@ -52,7 +53,7 @@ async def get_profiles_options(request: Request):
 @router.get(
     '/profiles',
     tags=['Extension: Profile'],
-    response_model=Dict[str, Any],
+    response_model=List[Dict[str, Any]],
 )
 async def get_profiles(
         request: Request,
@@ -63,6 +64,7 @@ async def get_profiles(
     if origin is not None:
         origin_response = await request_origin_verifier.create_response(oauth_request, origin)
         if origin_response is not None:
+            allow_all_get_cors.augment(request, origin_response)
             return origin_response
     response = await other_users_inspection.create_response(oauth_request)
     allow_all_get_cors.augment(request, response)

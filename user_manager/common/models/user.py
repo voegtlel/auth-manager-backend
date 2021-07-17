@@ -20,7 +20,7 @@ class DbUser(BaseDocument):
     __indexes__ = [
         IndexModel([('email', ASCENDING)], unique=True),
         IndexModel([('card_id', ASCENDING)], unique=True, sparse=True),
-        IndexModel([('preferred_username', ASCENDING)], unique=True),
+        IndexModel([('preferred_username', ASCENDING)], unique=True, sparse=True),
         IndexModel([('registration_token', HASHED)]),
         IndexModel([('email_verification_token', HASHED)]),
         IndexModel([('password_reset_token', HASHED)]),
