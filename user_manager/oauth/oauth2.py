@@ -451,18 +451,26 @@ class RequestOriginVerifier:
 
 
 class OtherUserInspection(UserInfoMixin):
-    async def create_response(self, request: TypedRequest, user_id: str) -> Response:
+    async def create_response(self, request: TypedRequest, user_id: str, client_auth: dict = None) -> Response:
         try:
             assert isinstance(request, OAuth2Request)
-            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
-            if request.token is None:
-                raise HTTPException(403, "Invalid token")
-            if USERS_SCOPE not in scope_to_list(request.token.scope):
+            if request.client is None:
+                request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+                if request.token is None:
+                    raise HTTPException(403, "Invalid token")
+                client_id = request.token.client_id
+                scopes = request.token.scope
+                scope = USERS_SCOPE
+            else:
+                client_id = request.client_id
+                scopes = request.client.allowed_scope
+                scope = scopes
+            if USERS_SCOPE not in scope_to_list(scopes):
                 raise InsufficientScopeError('Missing "*users" scope', request.uri)
-            user = await UserWithRoles.async_load(user_id, request.token.client_id)
+            user = await UserWithRoles.async_load(user_id, client_id)
             if user is None:
                 raise HTTPException(404, "User not found")
-            user_info = await self.async_generate_user_info(user, USERS_SCOPE)
+            user_info = await self.async_generate_user_info(user, scope)
             return JSONResponse(user_info)
         except OAuth2Error as error:
             return authorization.handle_error_response(request, error)
@@ -472,18 +480,26 @@ class OtherUsersInspection(UserInfoMixin):
     async def create_response(self, request: TypedRequest) -> Response:
         try:
             assert isinstance(request, OAuth2Request)
-            request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
-            if request.token is None:
-                raise HTTPException(403, "Invalid token")
-            if USERS_SCOPE not in scope_to_list(request.token.scope):
+            if request.client is None:
+                request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+                if request.token is None:
+                    raise HTTPException(403, "Invalid token")
+                client_id = request.token.client_id
+                scopes = request.token.scope
+                scope = USERS_SCOPE
+                load_roles = False
+            else:
+                client_id = request.client_id
+                scopes = request.client.allowed_scope
+                scope = scopes
+                load_roles = True
+            if USERS_SCOPE not in scope_to_list(scopes):
                 raise InsufficientScopeError('Missing "*users" scope', request.uri)
             user_infos = []
-            async for user in UserWithRoles.async_load_all(request.token.client_id):
-                user_info = await self.async_generate_user_info(
-                    UserWithRoles(user=user, roles=[], last_modified=user.updated_at),
-                    USERS_SCOPE
-                )
-                del user_info['roles']
+            for user in await UserWithRoles.async_load_all(client_id, load_roles=load_roles):
+                user_info = await self.async_generate_user_info(user, scope)
+                if not load_roles:
+                    del user_info['roles']
                 user_infos.append(user_info)
             return JSONResponse(user_infos)
         except OAuth2Error as error:

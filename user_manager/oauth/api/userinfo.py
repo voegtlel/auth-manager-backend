@@ -40,7 +40,7 @@ async def get_userinfo(
     response = await user_introspection.create_response(oauth_request)
     allow_all_get_cors.augment(request, response)
 
-    if str(oauth_request.user.last_modified) != session_state:
+    if oauth_request.user is not None and str(oauth_request.user.last_modified) != session_state:
         update_session_state(response, oauth_request.user)
 
     return response

@@ -54,7 +54,9 @@ class AuthenticateClient:
             {'_id': credentials.username, 'client_secret': credentials.password, 'allowed_scope': self.scope_name}
         )
         if client_data is None:
-            raise HTTPException(
-                status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
-            )
+            if self.auto_error:
+                raise HTTPException(
+                    status_code=HTTP_403_FORBIDDEN, detail="Not authenticated"
+                )
+            return None
         return client_data
