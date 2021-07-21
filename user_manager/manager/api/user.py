@@ -517,9 +517,9 @@ async def remove_user(
             await async_user_picture_bucket.delete(user.picture)
         except gridfs.errors.NoFile:
             pass
-    await async_session_collection.delete({'user_id': user_id})
-    await async_authorization_code_collection.delete({'user_id': user_id})
-    await async_token_collection.delete({'user_id': user_id})
+    await async_session_collection.delete_many({'user_id': user_id})
+    await async_authorization_code_collection.delete_many({'user_id': user_id})
+    await async_token_collection.delete_many({'user_id': user_id})
     await async_user_group_collection.update_many(
         {'members': user_id},
         {
