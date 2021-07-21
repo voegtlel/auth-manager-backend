@@ -1,12 +1,14 @@
 from typing import Type
 
+from motor.core import AgnosticDatabase
 from pymongo import MongoClient
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import OperationFailure
 
 from user_manager.common.config import config
-from .models import BaseDocument, Session, AuthorizationCode, Token, User, Client, UserGroup, \
-    ClientUserCache, IpLoginThrottle
+from .models import DbSession, DbAuthorizationCode, DbToken, DbUser, DbClient, DbUserGroup, DbClientUserCache, \
+    DbIpLoginThrottle, DbManagerSchema, DbUserView, DbUserHistory, DbGroupMail
+from .models.base import BaseDocument
 
 db = MongoClient(config.mongo.uri).get_database()
 
@@ -28,7 +30,7 @@ def _collection(collection_cls: Type[BaseDocument]):
     return db[collection_cls.__collection_name__]
 
 
-def _async_collection(collection_cls: Type[BaseDocument]):
+def _async_collection(collection_cls: Type[BaseDocument]) -> AgnosticDatabase:
     return async_db[collection_cls.__collection_name__]
 
 
@@ -42,28 +44,55 @@ def _async_gridfs(bucket_name: str):
     return motor.motor_asyncio.AsyncIOMotorGridFSBucket(async_db, bucket_name=bucket_name, disable_md5=True)
 
 
-session_collection = _collection(Session)
-authorization_code_collection = _collection(AuthorizationCode)
-token_collection = _collection(Token)
-ip_login_throttle_collection = _collection(IpLoginThrottle)
+session_collection = _collection(DbSession)
+authorization_code_collection = _collection(DbAuthorizationCode)
+token_collection = _collection(DbToken)
+ip_login_throttle_collection = _collection(DbIpLoginThrottle)
 
-client_collection = _collection(Client)
-client_user_cache_collection = _collection(ClientUserCache)
-user_group_collection = _collection(UserGroup)
-user_collection = _collection(User)
-
-
+client_collection = _collection(DbClient)
+client_user_cache_collection = _collection(DbClientUserCache)
+user_group_collection = _collection(DbUserGroup)
+user_collection = _collection(DbUser)
+user_view_collection = _collection(DbUserView)
+user_history_collection = _collection(DbUserHistory)
 user_picture_bucket = _gridfs('userPicture')
+user_group_mail_collection = _collection(DbGroupMail)
+
+_manager_schema_collection = _collection(DbManagerSchema)
 
 
-async_session_collection = _async_collection(Session)
-async_authorization_code_collection = _async_collection(AuthorizationCode)
-async_token_collection = _async_collection(Token)
-async_ip_login_throttle_collection = _async_collection(IpLoginThrottle)
+async_session_collection = _async_collection(DbSession)
+async_authorization_code_collection = _async_collection(DbAuthorizationCode)
+async_token_collection = _async_collection(DbToken)
+async_ip_login_throttle_collection = _async_collection(DbIpLoginThrottle)
 
-async_client_collection = _async_collection(Client)
-async_client_user_cache_collection = _async_collection(ClientUserCache)
-async_user_group_collection = _async_collection(UserGroup)
-async_user_collection = _async_collection(User)
-
+async_client_collection = _async_collection(DbClient)
+async_client_user_cache_collection = _async_collection(DbClientUserCache)
+async_user_group_collection = _async_collection(DbUserGroup)
+async_user_collection = _async_collection(DbUser)
+async_user_view_collection = _async_collection(DbUserView)
+async_user_history_collection = _async_collection(DbUserHistory)
 async_user_picture_bucket = _async_gridfs('userPicture')
+async_group_mail_collection = _async_collection(DbGroupMail)
+
+_async_manager_schema_collection = _async_collection(DbManagerSchema)
+
+
+async def async_read_schema() -> DbManagerSchema:
+    return DbManagerSchema.validate_document(await _async_manager_schema_collection.find_one({'_id': 0}))
+
+
+def read_schema() -> DbManagerSchema:
+    return DbManagerSchema.validate_document(_manager_schema_collection.find_one({'_id': 0}))
+
+
+async def async_update_schema(new_schema: DbManagerSchema, upsert: bool = False):
+    await _async_manager_schema_collection.replace_one(
+        {'_id': 0}, new_schema.document(), upsert=upsert
+    )
+
+
+def update_schema(new_schema: DbManagerSchema, upsert: bool = False):
+    _manager_schema_collection.replace_one(
+        {'_id': 0}, new_schema.document(), upsert=upsert
+    )

@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, FileResponse
 
 from user_manager.common.config import config
-from user_manager.common.models import User, Session
+from user_manager.common.models import DbUser, DbSession
 from user_manager.common.mongo import async_user_collection, async_session_collection
 from user_manager.common.password_helper import verify_and_update
 from user_manager.common.throttle import async_throttle, async_throttle_failure_request
@@ -62,6 +62,7 @@ class OAuthAuthorizeRequestQueryParams:
     tags=['OAuth2 Provider: Authorize'],
     responses={
         302: {'description': "Redirect to authentication page or redirect_uri if session is valid"},
+        200: {'content': {'application/json': {}, 'text/html': {}}},
         400: {'model': ErrorResult},
         403: {'model': ErrorResult},
     },
@@ -138,7 +139,7 @@ async def authorize(
             403, "Invalid E-Mail or Password", headers={'X-Retry-After': retry_after, 'X-Retry-Wait': retry_delay}
         )
 
-    user = User.validate(user_data)
+    user = DbUser.validate_document(user_data)
     if new_hash is not None:
         await async_user_collection.update_one({'_id': user.id}, {'$set': {'password': new_hash}})
         user.password = new_hash
@@ -186,14 +187,14 @@ async def authorize(
         resp = resp.to_json_response()
         if auth_credentials.remember:
             now = int(time.time())
-            sess = Session(
+            sess = DbSession(
                 id=generate_token(config.oauth2.token_length),
                 user_id=user.id,
                 issued_at=now,
                 expires_in=expires_in,
                 expiration_time=datetime.utcnow() + timedelta(seconds=expires_in),
             )
-            await async_session_collection.insert_one(sess.dict(exclude_none=True, by_alias=True))
+            await async_session_collection.insert_one(sess.document())
             update_session_sid(resp, sess.id)
         update_session_state(resp, oauth_request.user)
         return resp

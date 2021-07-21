@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from user_manager.common.config import config
+from user_manager.common.mongo import async_read_schema
 from user_manager.oauth.oauth2_key import JSONWebKeySet, jwks, supported_alg_sig
 from .cors_helper import allow_all_get_cors
 
@@ -65,17 +66,13 @@ class OpenIDConnectResponse(BaseModel):
     userinfo_signing_alg_values_supported: List[str]
     claims_supported: List[str] = [
         "sub",
-        "groupIds",
         "name",
         "preferred_username",
         "picture",
         "locale",
         "email",
         "profile",
-        "given_name",
-        "family_name",
         "aud",
-        "sub",
         "iss",
     ]
     token_endpoint_auth_methods_supported: List[str] = [
@@ -101,6 +98,13 @@ async def get_openid_configuration_options(request: Request):
     response_model=OpenIDConnectResponse,
 )
 async def get_openid_configuration(request: Request):
+    schema = await async_read_schema()
+    claims = list(set(
+        prop.valid_key
+        for scope in schema.scopes
+        for prop in scope.properties
+    ))
+    scopes = [scope.key for scope in schema.scopes]
     response = RawJSONResponse(
         OpenIDConnectResponse(
             issuer=config.oauth2.issuer,
@@ -109,11 +113,12 @@ async def get_openid_configuration(request: Request):
             revocation_endpoint=config.oauth2.base_url + '/token/revoke',
             userinfo_endpoint=config.oauth2.base_url + '/userinfo',
             jwks_uri=config.oauth2.base_url + '/.well-known/jwks',
-            scopes_supported=['openid', 'offline_access'] + list(config.oauth2.user.scopes.keys()),
+            scopes_supported=['openid', 'offline_access'] + scopes,
             id_token_signing_alg_values_supported=supported_alg_sig,
             userinfo_signing_alg_values_supported=supported_alg_sig,
             check_session_iframe=config.oauth2.base_url + '/login-status-iframe.html',
             end_session_endpoint=config.oauth2.base_url + '/end_session',
+            claims_supported=['aud', 'iss'] + claims,
         ).json(),
         headers={
             'Access-Control-Allow-Origin': '*'

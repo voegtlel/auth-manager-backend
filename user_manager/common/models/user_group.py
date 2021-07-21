@@ -1,22 +1,23 @@
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import Field
+from pymongo import IndexModel, ASCENDING
+
+from user_manager.common.models.base import BaseDocument
 
 
-class GroupInList(BaseModel):
-    id: str
+class DbUserGroup(BaseDocument):
+    __indexes__ = [
+        IndexModel([('member_groups', ASCENDING)]),
+        IndexModel([('members', ASCENDING)]),
+    ]
+    __collection_name__ = 'user_group'
 
-    group_name: str
-    visible: bool
+    id: str = Field(..., alias='_id')
 
-    enable_email: bool
-    enable_postbox: bool
-
-
-class GroupBase(BaseModel):
     group_name: str
     group_type: str
-    notes: Optional[str]
+    notes: Optional[str] = Field(None, max_length=1024 * 1024)
 
     visible: bool
 
@@ -34,15 +35,3 @@ class GroupBase(BaseModel):
     email_managed_mailing_list_notify_members: List[str] = []
     email_managed_mailing_list_forward_to_notifiers: bool = False
     email_managed_mailing_list_send_notification_to_sender: bool = False
-
-
-class GroupInRead(GroupBase):
-    id: str
-
-
-class GroupInWrite(GroupBase):
-    pass
-
-
-class GroupInCreate(GroupBase):
-    id: str

@@ -63,77 +63,6 @@ def _assign_key(cfg: Union[list, Dict[str, Any]], key: str, value: Any, self_pat
         )
 
 
-class OAuthFieldType(Enum):
-    string = str
-    integer = int
-    boolean = bool
-    datetime = datetime
-
-
-class UserPropertyType(str, Enum):
-    str = 'str'
-    multistr = 'multistr'
-    int = 'int'
-    datetime = 'datetime'
-    date = 'date'
-    bool = 'bool'
-    enum = 'enum'
-    password = 'password'
-    email = 'email'
-    picture = 'picture'
-    groups = 'groups'
-    token = 'token'
-    access_token = 'access_token'
-    separator = 'separator'
-
-
-class AccessType(str, Enum):
-    everybody = 'everybody'
-    self = 'self'
-    only_self = 'only_self'
-    admin = 'admin'
-    nobody = 'nobody'
-
-    def has_access(self, is_self: bool = False, is_admin: bool = False) -> bool:
-        return (
-            self == AccessType.everybody or
-            (self == AccessType.self and (is_self or is_admin)) or
-            (self == AccessType.only_self and is_self) or
-            (self == AccessType.admin and is_admin)
-        )
-
-
-class EnumValue(BaseModel):
-    value: str
-    title: str
-
-
-class UserProperty(BaseModel):
-    type: UserPropertyType = ...
-    format: Optional[str]
-    format_help: Optional[str]
-    can_edit: AccessType = AccessType.nobody
-    can_read: AccessType = AccessType.everybody
-    write_once: bool = False
-    default: Optional[Any]
-    visible: AccessType = AccessType.everybody
-    title: Optional[str]
-    values: Optional[List[EnumValue]]
-    template: Optional[str]
-    required: Optional[bool]
-
-
-class Scope(BaseModel):
-    title: str
-    properties: List[str]
-
-
-class UserScopes(BaseModel):
-    properties: Dict[str, UserProperty]
-    scopes: Dict[str, Scope]
-    password: Dict[str, Any]
-
-
 class MongoConfig(BaseModel):
     uri: str = ...
 
@@ -211,9 +140,6 @@ class OAuth2Config(BaseModel):
     keys: List[KeyConfig] = ...
     issuer: str = ...
 
-    card_authentication_api_key: Optional[str] = None
-    card_authentication_client_id: Optional[str] = None
-
     token_expiration: OAuth2TokenExpiration = OAuth2TokenExpiration()
 
     token_length: int = ...
@@ -224,7 +150,9 @@ class OAuth2Config(BaseModel):
 
     login_throttler: OAuth2LoginThrottler
 
-    user: UserScopes = ...
+    password: Dict[str, Any]
+
+    mail_storage_path: Optional[str]
 
 
 class ManagerTokenValid(BaseModel):
@@ -241,10 +169,7 @@ class ManagerConfig(BaseModel):
     name: str = ...
     oauth2: OAuth2ClientConfig
     mail: MailConfig = ...
-    view: List[Optional[str]] = ...
-    registration: List[Optional[str]] = ...
     token_valid: ManagerTokenValid = ...
-    list: List[str] = ...
 
 
 class Config(BaseModel):

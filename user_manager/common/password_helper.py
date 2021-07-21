@@ -5,10 +5,10 @@ from passlib.context import CryptContext
 from user_manager.common.config import config
 
 pwned_password_check = False
-if 'pwned_password_check' in config.oauth2.user.password:
-    pwned_password_check = config.oauth2.user.password['pwned_password_check']
-    del config.oauth2.user.password['pwned_password_check']
-crypt_context = CryptContext(**config.oauth2.user.password)
+if 'pwned_password_check' in config.oauth2.password:
+    pwned_password_check = config.oauth2.password['pwned_password_check']
+    del config.oauth2.password['pwned_password_check']
+crypt_context = CryptContext(**config.oauth2.password)
 
 
 class PasswordLeakedException(Exception):
