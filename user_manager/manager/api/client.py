@@ -41,7 +41,7 @@ async def create_client(
     """Creates a client."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_client = DbClient.validate_override(client_data, id=str(uuid4()))
+    new_client = DbClient.validate_override(client_data)
     await async_client_collection.insert_one(new_client.document())
 
 
