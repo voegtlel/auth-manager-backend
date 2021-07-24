@@ -136,7 +136,7 @@ async def _get_user_view(
                         value=(
                             schema.properties_by_key[prop].default
                             if user_data is None else
-                            _get_user_property_value(prop, schema, user_data, user_data['_id'] == is_self, is_admin)
+                            _get_user_property_value(prop, schema, user_data, is_self, is_admin)
                         ),
                         **schema.properties_by_key[prop].dict()
                     )

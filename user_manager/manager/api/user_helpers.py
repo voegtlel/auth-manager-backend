@@ -341,7 +341,8 @@ async def update_user(
 
     if is_registering and update_data.get('email', user_data['email']) == user_data['email']:
         user_data['email_verified'] = True
-        del update_data['email']
+        if 'email' in update_data:
+            del update_data['email']
     elif 'email' in update_data:
         if not isinstance(update_data['email'], str):
             raise HTTPException(400, "'email' must be a string")
