@@ -183,10 +183,11 @@ class UserInfoMixin(object):
             if prop.type == UserPropertyType.picture:
                 value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
+                group_filter = {} if group_type is None else {'group_type': group_type}
                 value = [
                     group['_id']
                     for group in user_group_collection.find(
-                        {'_id': {'$in': value}, 'visible': True},
+                        {'_id': {'$in': value}, 'visible': True, **group_filter},
                         projection={'_id': 1}
                     )
                 ]
@@ -208,10 +209,11 @@ class UserInfoMixin(object):
             if prop.type == UserPropertyType.picture:
                 value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
+                group_filter = {} if group_type is None else {'group_type': group_type}
                 value = [
                     group['_id']
                     async for group in async_user_group_collection.find(
-                        {'_id': {'$in': value}, 'visible': True},
+                        {'_id': {'$in': value}, 'visible': True, **group_filter},
                         projection={'_id': 1}
                     )
                 ]
