@@ -243,20 +243,19 @@ if __name__ == '__main__':
             ).dict(by_alias=True, exclude_none=True))
             continue
 
-        preferred_username = base_username = normalize_username(user.display_name)
-        username_counter = 2
-        while (
-                mongo.user_collection.count_documents({'preferred_username': preferred_username}, limit=1) != 0 or
-                preferred_username in usernames
-        ):
-            preferred_username = base_username + str(username_counter)
-            username_counter += 1
-        usernames.add(preferred_username)
-
+        new_id = generate_token(48)
         if args.keep_ids:
-            new_id = user.uid
+            preferred_username = user.uid
         else:
-            new_id = generate_token(48)
+            preferred_username = base_username = normalize_username(user.display_name)
+            username_counter = 2
+            while (
+                    mongo.user_collection.count_documents({'preferred_username': preferred_username}, limit=1) != 0 or
+                    preferred_username in usernames
+            ):
+                preferred_username = base_username + str(username_counter)
+                username_counter += 1
+        usernames.add(preferred_username)
         user_mapping[user.uid] = new_id
 
         users.append(

@@ -62,7 +62,7 @@ async def create_group(
     """Creates a group."""
     if 'admin' not in user['roles']:
         raise HTTPException(401)
-    new_group = DbUserGroup.validate_override(group_data, id=str(uuid4()))
+    new_group = DbUserGroup.validate_override(group_data)
     new_group.id = new_group.id.lower()
     if not new_group.enable_email:
         new_group.email_forward_members = []

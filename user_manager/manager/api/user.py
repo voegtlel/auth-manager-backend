@@ -42,7 +42,7 @@ def _get_user_property_value(
         if prop.type == UserPropertyType.password:
             return None
         if prop.type == UserPropertyType.picture:
-            if prop_key in user_data:
+            if prop_key in user_data and user_data[prop_key] is not None:
                 return f"{config.oauth2.base_url}/picture/{user_data[prop_key]}"
             return None
         if is_registering and user_data.get(prop_key) is None and prop.default:

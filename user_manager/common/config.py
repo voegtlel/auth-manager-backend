@@ -1,6 +1,5 @@
 import io
 import os
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Union, List, Optional
 
@@ -139,6 +138,9 @@ class OAuth2Config(BaseModel):
 
     keys: List[KeyConfig] = ...
     issuer: str = ...
+    otp_name: Optional[str] = None
+    otp_size: int = 64
+    totp_window: int = 1
 
     token_expiration: OAuth2TokenExpiration = OAuth2TokenExpiration()
 

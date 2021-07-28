@@ -1,11 +1,10 @@
 import re
-from uuid import uuid4
-
-import time
 from base64 import b64encode, b64decode
 from datetime import datetime
 from typing import Dict, Any, Optional, Sequence, List
+from uuid import uuid4
 
+import time
 from authlib.common.security import generate_token
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -199,7 +198,7 @@ async def update_resend_registration(
     await async_send_mail_register(user_data, schema, token_valid_until, author_id=author_id)
 
 
-def _validate_property_write(schema: DbManagerSchema, key: str, is_self: bool, is_admin: bool):
+def validate_property_write(schema: DbManagerSchema, key: str, is_self: bool, is_admin: bool):
     prop = schema.properties_by_key.get(key)
     if prop is None:
         raise HTTPException(400, f"{repr(key)}={repr(prop)} is not a valid property")
@@ -232,7 +231,7 @@ async def _update_groups(
     if not isinstance(update_data[property_key], list) or \
             not all(isinstance(group, str) for group in update_data[property_key]):
         raise HTTPException(400, f"{repr(property_key)} must be a string")
-    _validate_property_write(schema, property_key, is_self, is_admin)
+    validate_property_write(schema, property_key, is_self, is_admin)
 
     reset_user_cache = False
 
@@ -320,7 +319,7 @@ async def update_user(
     if 'password' in update_data:
         if not isinstance(update_data['password'], str):
             raise HTTPException(400, "'password' must be a string")
-        _validate_property_write(schema, 'password', is_self, is_admin)
+        validate_property_write(schema, 'password', is_self, is_admin)
         if is_self and not is_registering and user_data.get('password') is not None:
             if 'old_password' not in update_data:
                 raise HTTPException(400, f"Need {repr('old_password')} for setting password")
@@ -346,7 +345,7 @@ async def update_user(
     elif 'email' in update_data:
         if not isinstance(update_data['email'], str):
             raise HTTPException(400, "'email' must be a string")
-        _validate_property_write(schema, 'email', is_self, is_admin)
+        validate_property_write(schema, 'email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
         if await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
@@ -402,7 +401,7 @@ async def update_user(
             access_tokens = [ValidateAccessToken.validate(val) for val in update_data['access_tokens']]
         except ValueError as err:
             raise HTTPException(400, str(err))
-        _validate_property_write(schema, 'access_tokens', is_self, is_admin)
+        validate_property_write(schema, 'access_tokens', is_self, is_admin)
         existing_access_tokens = [
             DbUserPasswordAccessToken.validate_document(access_token)
             for access_token in user_data.get('access_tokens', [])
@@ -411,22 +410,28 @@ async def update_user(
             existing_access_token.id: existing_access_token
             for existing_access_token in existing_access_tokens
         }
+        has_change = False
         new_access_tokens = []
         for access_token in access_tokens:
             if access_token.id is not None:
                 store_token = existing_access_tokens_by_id.pop(access_token.id, None)
                 if store_token is None:
                     raise HTTPException(400, f"Invalid token ID {access_token.id}")
-                history_entry.changes.append(DbChange(
-                    property='access_tokens', value=f"Rename {store_token.description} -> {access_token.description}"
-                ))
-                store_token.description = access_token.description
+                if store_token.description != access_token.description:
+                    has_change = True
+                    history_entry.changes.append(DbChange(
+                        property='access_tokens',
+                        value=f"Rename {store_token.description} -> {access_token.description}",
+                    ))
+                    store_token.description = access_token.description
                 if access_token.token is not None:
+                    has_change = True
                     history_entry.changes.append(DbChange(
                         property='access_tokens', value=f"Regenerate {store_token.description}"
                     ))
                     store_token.token = access_token.token
             else:
+                has_change = True
                 store_token = DbUserPasswordAccessToken(
                     id=generate_token(24),
                     description=access_token.description,
@@ -441,7 +446,8 @@ async def update_user(
         ) for deleted_token in existing_access_tokens_by_id.values())
         del update_data['access_tokens']
         user_data['access_tokens'] = [access_token.dict() for access_token in new_access_tokens]
-        history_entry.changes.append(DbChange(property='access_tokens', value="Updated"))
+        if has_change:
+            history_entry.changes.append(DbChange(property='access_tokens', value="Updated"))
 
     if 'groups' in update_data:
         if await _update_groups(
@@ -507,7 +513,7 @@ async def update_user(
         )
 
     for key, value in update_data.items():
-        _validate_property_write(schema, key, is_self, is_admin)
+        validate_property_write(schema, key, is_self, is_admin)
         prop = schema.properties_by_key[key]
         if prop.write_once and user_data.get(key) is not None:
             raise HTTPException(400, f"{repr(key)} can only be set once")
