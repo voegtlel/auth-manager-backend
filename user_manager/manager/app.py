@@ -36,23 +36,24 @@ async def catch_exceptions_middleware(request: Request, call_next):
     try:
         resp = await call_next(request)
         if isinstance(resp, StreamingResponse):
-            async def stream_print():
-                async for chunk in resp.body_iterator:
-                    print(f"Body: {chunk}")
-                    yield chunk
+            if resp.status_code >= 400:
+                print(f"Header: {resp.headers}")
 
-            print(f"Header: {resp.headers}")
-            return StreamingResponse(
-                stream_print(),
-                resp.status_code,
-                headers=dict(resp.headers),
-                media_type=resp.media_type,
-                background=resp.background,
-            )
+                async def stream_print(orig_iterator):
+                    async for chunk in orig_iterator:
+                        if len(chunk) > 1024:
+                            print(f"Body: {chunk[:1024]}")
+                        else:
+                            print(f"Body: {chunk}")
+                        yield chunk
+
+                resp.body_iterator = stream_print(resp.body_iterator)
         elif isinstance(resp, Response):
             if resp.status_code >= 400:
                 print(f"Header: {resp.headers}")
                 print(f"Body: {resp.body}")
+        else:
+            print(f"Unknown response type: {type(resp)}")
         return resp
     except Exception:
         traceback.print_exc()
