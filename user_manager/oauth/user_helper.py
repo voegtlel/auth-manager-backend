@@ -120,7 +120,7 @@ async def _async_create_user_cache_for_user_client(user_data: DbUser, client_id:
     effective_groups = set(client_user_groups) | {
         group for user_group in client_user_groups for group in user_groups.get(user_group, [])
     }
-    if client_user_groups and client_user_roles:
+    if client_user_groups:
         cache_entry = DbClientUserCache(
             id=generate_token(30),
             client_id=client_id,
