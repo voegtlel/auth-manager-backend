@@ -65,22 +65,27 @@ class DatabaseReader:
         )
 
         def none_str(x):
-            return x if x is None else str(x)
+            if x is None:
+                return None
+            if isinstance(x, bytes):
+                return x.decode()
+            return str(x)
 
         for uid, displayname, password, data in user_cursor:
             account = json.loads(data)
             preferences_cursor.execute(preferences_query, (uid,))
+            password = none_str(password)
             if password and len(password) > 2 and password[1] == '|':
                 password = password[2:]
             groups_cursor.execute(groups_query, (uid,))
-            groups = [str(gid) for gid, in groups_cursor]
+            groups = [none_str(gid) for gid, in groups_cursor]
             profile = UserData(
                 uid=uid,
-                display_name=displayname or account.get('displayname', {}).get('value'),
+                display_name=none_str(displayname or account.get('displayname', {}).get('value')),
                 password=password,
                 address=none_str(account.get('address', {}).get('value')),
                 email=none_str(account.get('email', {}).get('value')),
-                email_verified=account.get('email', {}).get('verified', "0") != "0",
+                email_verified=none_str(account.get('email', {}).get('verified', "0")) != "0",
                 phone=none_str(account.get('phone', {}).get('value')),
                 groups=groups,
             )
