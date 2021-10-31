@@ -266,7 +266,6 @@ if __name__ == '__main__':
                     author_id='batch',
                     changes=[DbChange(property='password', value='Set')],
                 ).dict(by_alias=True, exclude_none=True))
-                continue
             else:
                 print("Update groups of", user)
                 user_mapping[user.uid] = existing_user_id
@@ -282,7 +281,7 @@ if __name__ == '__main__':
                         author_id='batch',
                         changes=[DbChange(property='groups', value=f'Added {", ".join(user.groups)}')],
                     ).dict(by_alias=True, exclude_none=True))
-                continue
+            continue
 
         new_id = generate_token(48)
         if args.keep_ids:
