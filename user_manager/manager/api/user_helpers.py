@@ -343,15 +343,16 @@ async def update_user(
         if 'email' in update_data:
             del update_data['email']
     elif 'email' in update_data:
-        if not isinstance(update_data['email'], str):
+        new_mail = update_data['email']
+        if not isinstance(new_mail, str):
             raise HTTPException(400, "'email' must be a string")
         validate_property_write(schema, 'email', is_self, is_admin)
-        if not is_email(update_data['email'], check_dns=True):
+        if not is_email(new_mail, check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
-        if update_data.get('email', user_data['email']) != user_data['email'] and \
-                await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
+
+        if new_mail != user_data.get('email') and \
+                await async_user_collection.count_documents({'email': new_mail}, limit=1) != 0:
             raise HTTPException(400, "E-Mail address already in use, please use existing account")
-        new_mail = update_data['email']
         locale = update_data.get('locale', user_data.get('locale', schema.properties_by_key['locale'].default))
         if locale is None:
             locale = 'en_us'
