@@ -172,6 +172,10 @@ async def authorize(
             headers=dict(default_json_headers),
         )
     user_group_data = await UserWithRoles.async_load_groups(user, _query_params.client_id)
+    if user_group_data is None:
+        raise HTTPException(
+            403, "User is not allowed to use service"
+        )
     oauth_request = await oauth2_request(request)
     resp = await run_in_threadpool(
         authorization.create_authorization_response,

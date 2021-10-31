@@ -69,6 +69,7 @@ class DbUserScopeProperty(BaseSubDocument):
     key: Optional[str]
 
     group_type: Optional[str]
+    group_by_name: Optional[bool]
 
     @property
     def valid_key(self) -> str:

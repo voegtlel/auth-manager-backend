@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import Field, Extra
@@ -10,6 +11,25 @@ class DbUserPasswordAccessToken(BaseSubDocument):
     id: str
     description: str
     token: str
+
+
+class TwoFactorType(Enum):
+    totp = 'totp'
+    hotp = 'hotp'
+    email = 'email'
+    webauthn = 'webauthn'
+
+
+class DbUserTwoFactor(BaseSubDocument):
+    type: TwoFactorType
+    id: str
+    name: str
+    issuer: Optional[str]
+    secret: Optional[str]
+    credential_id: Optional[bytes]
+    pub_key: Optional[bytes]
+    counter: Optional[int]
+    rp_id: Optional[bytes]
 
 
 class DbUser(BaseDocument):
@@ -34,6 +54,8 @@ class DbUser(BaseDocument):
 
     password: Optional[str] = None
     password_reset_token: Optional[str] = None
+
+    two_factor: Optional[List[DbUserTwoFactor]] = None
 
     active: bool = False
 

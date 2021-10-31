@@ -42,7 +42,7 @@ def _get_user_property_value(
         if prop.type == UserPropertyType.password:
             return None
         if prop.type == UserPropertyType.picture:
-            if prop_key in user_data:
+            if prop_key in user_data and user_data[prop_key] is not None:
                 return f"{config.oauth2.base_url}/picture/{user_data[prop_key]}"
             return None
         if is_registering and user_data.get(prop_key) is None and prop.default:
@@ -136,7 +136,7 @@ async def _get_user_view(
                         value=(
                             schema.properties_by_key[prop].default
                             if user_data is None else
-                            _get_user_property_value(prop, schema, user_data, user_data['_id'] == is_self, is_admin)
+                            _get_user_property_value(prop, schema, user_data, is_self, is_admin)
                         ),
                         **schema.properties_by_key[prop].dict()
                     )
@@ -517,9 +517,9 @@ async def remove_user(
             await async_user_picture_bucket.delete(user.picture)
         except gridfs.errors.NoFile:
             pass
-    await async_session_collection.delete({'user_id': user_id})
-    await async_authorization_code_collection.delete({'user_id': user_id})
-    await async_token_collection.delete({'user_id': user_id})
+    await async_session_collection.delete_many({'user_id': user_id})
+    await async_authorization_code_collection.delete_many({'user_id': user_id})
+    await async_token_collection.delete_many({'user_id': user_id})
     await async_user_group_collection.update_many(
         {'members': user_id},
         {

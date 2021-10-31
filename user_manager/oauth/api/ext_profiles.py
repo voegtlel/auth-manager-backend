@@ -12,7 +12,7 @@ from ...common.models import DbClient
 router = APIRouter()
 
 
-opt_client_auth = AuthenticateClient('*users', auto_error=False)
+client_auth = AuthenticateClient('*users')
 
 
 @router.options(
@@ -32,7 +32,7 @@ async def get_profile_options(request: Request):
 async def get_profile(
         request: Request,
         user_id: str,
-        client: Optional[dict] = Depends(opt_client_auth)
+        client: Optional[dict] = Depends(client_auth)
 ):
     """Inspect other user's profile."""
     oauth_request = await oauth2_request(request)
@@ -66,7 +66,7 @@ async def get_profiles_options(request: Request):
 )
 async def get_profiles(
         request: Request,
-        client: Optional[dict] = Depends(opt_client_auth),
+        client: Optional[dict] = Depends(client_auth),
 ):
     """List other user's profiles."""
     oauth_request = await oauth2_request(request)

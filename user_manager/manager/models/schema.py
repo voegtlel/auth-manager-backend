@@ -34,6 +34,7 @@ class UserScopeProperty(BaseModel):
     key: Optional[str]
 
     group_type: Optional[str]
+    use_group_name: Optional[bool]
 
 
 class UserScope(BaseModel):

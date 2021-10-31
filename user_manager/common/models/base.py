@@ -67,14 +67,6 @@ class BaseSubDocument(BaseModel):
         allow_population_by_field_name = True
         validate_assignment = True
 
-
-class BaseDocument(BaseSubDocument):
-    __indexes__: List[IndexModel] = []
-    __collection_name__: str
-
-    def document(self):
-        return _safe_document(self.dict(exclude_none=True, by_alias=True))
-
     @classmethod
     def validate_override(cls: Type[TDocument], data: Union[dict, BaseModel], **overrides) -> TDocument:
         if isinstance(data, BaseModel):
@@ -94,6 +86,9 @@ class BaseDocument(BaseSubDocument):
         assert isinstance(doc, dict)
         return cls.validate(_validate_document(doc, cls))
 
+    def document(self):
+        return _safe_document(self.dict(exclude_none=True, by_alias=True))
+
     def update_from(self, src_doc):
         if isinstance(src_doc, BaseModel):
             for key in src_doc.__fields__.keys():
@@ -101,3 +96,8 @@ class BaseDocument(BaseSubDocument):
                     setattr(self, key, getattr(src_doc, key))
         else:
             assert False
+
+
+class BaseDocument(BaseSubDocument):
+    __indexes__: List[IndexModel] = []
+    __collection_name__: str

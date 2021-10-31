@@ -162,10 +162,14 @@ class JwtConfigMixin(object):
 
 
 class UserInfoMixin(object):
-    def _translate_properties(self, scope: str, schema: DbManagerSchema) -> List[Tuple[str, DbUserProperty, Optional[str]]]:
+    def _translate_properties(
+            self,
+            scope: str,
+            schema: DbManagerSchema,
+    ) -> List[Tuple[str, DbUserProperty, Optional[str], Optional[bool]]]:
         scope_list = ['*'] + scope_to_list(scope)
         return [
-            (prop.valid_key, schema.properties_by_key[prop.user_property], prop.group_type)
+            (prop.valid_key, schema.properties_by_key[prop.user_property], prop.group_type, prop.group_by_name)
             for scope_name in scope_list
             if scope_name not in ('openid', 'offline_access') and scope_name in schema.scopes_by_key
             for prop in schema.scopes_by_key[scope_name].properties
@@ -176,18 +180,20 @@ class UserInfoMixin(object):
         user_data = {
             'roles': user.roles,
         }
-        for key, prop, group_type in self._translate_properties(scope, read_schema()):
+        for key, prop, group_type, group_by_name in self._translate_properties(scope, read_schema()):
             if not hasattr(user.user, prop.key):
                 continue
             value = getattr(user.user, prop.key, None)
             if prop.type == UserPropertyType.picture:
-                value = f"{config.oauth2.base_url}/picture/{value}"
+                if value is not None:
+                    value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
+                group_filter = {} if group_type is None else {'group_type': group_type}
                 value = [
-                    group['_id']
+                    group['group_name'] if group_by_name else group['_id']
                     for group in user_group_collection.find(
-                        {'_id': {'$in': value}, 'visible': True},
-                        projection={'_id': 1}
+                        {'_id': {'$in': value}, 'visible': True, **group_filter},
+                        projection={'group_name' if group_by_name else '_id': 1}
                     )
                 ]
             elif prop.type in (
@@ -201,18 +207,20 @@ class UserInfoMixin(object):
         user_data = {
             'roles': user.roles,
         }
-        for key, prop, group_type in self._translate_properties(scope, await async_read_schema()):
+        for key, prop, group_type, group_by_name in self._translate_properties(scope, await async_read_schema()):
             if not hasattr(user.user, prop.key):
                 continue
             value = getattr(user.user, prop.key, None)
             if prop.type == UserPropertyType.picture:
-                value = f"{config.oauth2.base_url}/picture/{value}"
+                if value is not None:
+                    value = f"{config.oauth2.base_url}/picture/{value}"
             elif prop.type == UserPropertyType.groups:
+                group_filter = {} if group_type is None else {'group_type': group_type}
                 value = [
-                    group['_id']
+                    group['group_name'] if group_by_name else group['_id']
                     async for group in async_user_group_collection.find(
-                        {'_id': {'$in': value}, 'visible': True},
-                        projection={'_id': 1}
+                        {'_id': {'$in': value}, 'visible': True, **group_filter},
+                        projection={'group_name' if group_by_name else '_id': 1}
                     )
                 ]
             elif prop.type in (

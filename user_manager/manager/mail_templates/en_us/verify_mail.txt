@@ -1,4 +1,4 @@
-E-Mail Verification
+${config.manager.name} - E-Mail Verification
 Hello ${user.given_name},
 
 click the following link to verify this e-mail address for ${config.manager.name}: ${config.manager.frontend_base_url}/${verify_link}
