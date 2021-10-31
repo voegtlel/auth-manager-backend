@@ -350,7 +350,6 @@ default_schema = DbManagerSchema(
             type=UserPropertyType.multistr,
             can_edit=AccessType.admin,
             can_read=AccessType.admin,
-            format='^[0-9a-fA-F]*$'
         ),
         DbUserProperty(
             key="updated_at",

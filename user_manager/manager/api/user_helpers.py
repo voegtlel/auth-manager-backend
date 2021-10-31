@@ -348,7 +348,8 @@ async def update_user(
         validate_property_write(schema, 'email', is_self, is_admin)
         if not is_email(update_data['email'], check_dns=True):
             raise HTTPException(400, "E-Mail address not accepted")
-        if await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
+        if update_data.get('email', user_data['email']) != user_data['email'] and \
+                await async_user_collection.count_documents({'email': update_data['email']}, limit=1) != 0:
             raise HTTPException(400, "E-Mail address already in use, please use existing account")
         new_mail = update_data['email']
         locale = update_data.get('locale', user_data.get('locale', schema.properties_by_key['locale'].default))
