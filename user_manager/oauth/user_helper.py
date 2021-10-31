@@ -1,10 +1,10 @@
-from typing import List, Dict, Optional, AsyncIterator
+from typing import List, Dict, Optional
 
 from authlib.common.security import generate_token
 from fastapi import HTTPException
 from pydantic.main import BaseModel
 
-from user_manager.common.models import DbUserGroup, DbUser, DbClientUserCache, DbClient
+from user_manager.common.models import DbUserGroup, DbUser, DbClientUserCache
 from user_manager.common.mongo import user_group_collection, async_user_group_collection, client_collection, \
     client_user_cache_collection, async_client_collection, async_client_user_cache_collection, user_collection, \
     async_user_collection

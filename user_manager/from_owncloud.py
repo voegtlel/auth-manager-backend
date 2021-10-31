@@ -14,7 +14,6 @@ from pydantic.main import BaseModel
 
 from user_manager.common import mongo
 from user_manager.common.models import DbUserGroup, DbUser, DbUserHistory, DbChange
-from user_manager.common.mongo import user_history_collection
 from user_manager.manager.api.user_helpers import normalize_username
 
 
@@ -71,7 +70,7 @@ class DatabaseReader:
             if password and len(password) > 2 and password[1] == '|':
                 password = password[2:]
             groups_cursor.execute(groups_query, (uid,))
-            groups = [gid.lower() for gid, in groups_cursor]
+            groups = [gid for gid, in groups_cursor]
             profile = UserData(
                 uid=uid,
                 display_name=displayname or account.get('displayname', {}).get('value'),
@@ -197,6 +196,13 @@ if __name__ == '__main__':
         default=os.environ.get('KEEP_IDS', '0') == '1',
     )
 
+    parser.add_argument(
+        '--overwrite',
+        action='store_true',
+        help="... or use environment variable UPDATE_OVERWRITE='1'. If provided, and --keep-ids, then overwrite user.",
+        default=os.environ.get('UPDATE_OVERWRITE', '0') == '1',
+    )
+
     args = parser.parse_args()
 
     if args.dbtype == 'mysql':
@@ -212,6 +218,8 @@ if __name__ == '__main__':
     user_mapping = {}
     usernames = set()
 
+    remove_teams = {}
+
     for user in reader.read_users():
         if ' ' in user.display_name:
             given_name, family_name = user.display_name.rsplit(' ', 1)
@@ -224,24 +232,57 @@ if __name__ == '__main__':
 
         if args.keep_ids:
             existing_user = mongo.user_collection.find_one(
-                {'$or': [{'email': user.email}, {'_id': user.uid}]}, {'_id': 1}
+                {'$or': [{'email': user.email}, {'_id': user.uid}]}, {'_id': 1, 'groups': 1, 'name': 1}
             )
         else:
-            existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1})
+            existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1, 'groups': 1, 'name': 1})
         if existing_user is not None:
-            print("Update", user)
-            user_mapping[user.uid] = existing_user['_id']
-            mongo.user_collection.update_one(
-                {'_id': existing_user['_id']}, {'$addToSet': {'groups': {'$each': user.groups}}}
-            )
-            user_history_collection.insert_one(DbUserHistory(
-                id=str(uuid4()),
-                user_id=existing_user['_id'],
-                timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
-                author_id='batch',
-                changes=[DbChange(property='groups', value=f'Added {", ".join(user.groups)}')],
-            ).dict(by_alias=True, exclude_none=True))
-            continue
+            existing_user_id = existing_user['_id']
+            if args.overwrite:
+                print("Overwrite groups and password of", user)
+                user_mapping[user.uid] = existing_user_id
+                for group in set(existing_user['groups']) - set(user.groups):
+                    remove_team = remove_teams.get(group)
+                    if remove_team is None:
+                        remove_teams[group] = [existing_user_id]
+                    else:
+                        remove_team.append(existing_user_id)
+                mongo.user_collection.update_one(
+                    {'_id': existing_user_id}, {'$set': {
+                        'groups': list(set(user.groups)), 'password': user.password
+                    }}
+                )
+                mongo.user_history_collection.insert_one(DbUserHistory(
+                    id=str(uuid4()),
+                    user_id=existing_user_id,
+                    timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                    author_id='batch',
+                    changes=[DbChange(property='groups', value=f'Set {", ".join(user.groups)}')],
+                ).dict(by_alias=True, exclude_none=True))
+                mongo.user_history_collection.insert_one(DbUserHistory(
+                    id=str(uuid4()),
+                    user_id=existing_user_id,
+                    timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                    author_id='batch',
+                    changes=[DbChange(property='password', value='Set')],
+                ).dict(by_alias=True, exclude_none=True))
+                continue
+            else:
+                print("Update groups of", user)
+                user_mapping[user.uid] = existing_user_id
+                new_groups = set(user.groups) - set(existing_user['groups'])
+                if len(new_groups) > 0:
+                    mongo.user_collection.update_one(
+                        {'_id': existing_user_id}, {'$addToSet': {'groups': {'$each': new_groups}}}
+                    )
+                    mongo.user_history_collection.insert_one(DbUserHistory(
+                        id=str(uuid4()),
+                        user_id=existing_user_id,
+                        timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
+                        author_id='batch',
+                        changes=[DbChange(property='groups', value=f'Added {", ".join(user.groups)}')],
+                    ).dict(by_alias=True, exclude_none=True))
+                continue
 
         preferred_username = base_username = normalize_username(user.display_name)
         username_counter = 2
@@ -285,7 +326,7 @@ if __name__ == '__main__':
     groups = []
     for group in reader.read_groups():
         members = [user_mapping[member] for member in group.members]
-        gid = group.gid.lower()
+        gid = group.gid
         if mongo.user_group_collection.count_documents({'_id': gid}, limit=1) != 0:
             mongo.user_group_collection.update_one(
                 {'_id': gid},
@@ -303,7 +344,11 @@ if __name__ == '__main__':
                 members=members,
             ).document())
             print("Create group", groups[-1])
-
+    for group_id, remove_users in remove_teams.items():
+        mongo.user_group_collection.update_one(
+            {'_id': group_id},
+            {'$pull': {'members': {'$in': remove_users}}}
+        )
     if users:
         mongo.user_collection.insert_many(users)
     if groups:
@@ -312,3 +357,4 @@ if __name__ == '__main__':
         {'_id': 'users'},
         {'$addToSet': {'members': {'$each': list(user_mapping.values())}}}
     )
+    mongo.client_user_cache_collection.delete_many({'user_id': {'$in': list(user_mapping.values())}})
