@@ -40,6 +40,14 @@ class GroupData(BaseModel):
     members: List[str]
 
 
+def none_str(x):
+    if x is None:
+        return None
+    if isinstance(x, bytes):
+        return x.decode()
+    return str(x)
+
+
 class DatabaseReader:
     prefix: str
 
@@ -64,13 +72,6 @@ class DatabaseReader:
             f"SELECT gid FROM {self.prefix}group_user WHERE uid = %s"
         )
 
-        def none_str(x):
-            if x is None:
-                return None
-            if isinstance(x, bytes):
-                return x.decode()
-            return str(x)
-
         for uid, displayname, password, data in user_cursor:
             account = json.loads(data)
             preferences_cursor.execute(preferences_query, (uid,))
@@ -91,11 +92,11 @@ class DatabaseReader:
             )
             for appid, configkey, configvalue in preferences_cursor:
                 if (appid, configkey) == ('core', 'timezone'):
-                    profile.timezone = configvalue
+                    profile.timezone = none_str(configvalue)
                 elif (appid, configkey) == ('core', 'lang'):
-                    profile.language = configvalue
+                    profile.language = none_str(configvalue)
                 elif (appid, configkey) == ('settings', 'email') and configvalue is not None:
-                    profile.email = configvalue
+                    profile.email = none_str(configvalue)
             yield profile
         groups_cursor.close()
         preferences_cursor.close()
@@ -115,8 +116,8 @@ class DatabaseReader:
 
         for gid, displayname in group_cursor:
             member_cursor.execute(member_query, (gid,))
-            members = [uid for uid, in member_cursor]
-            yield GroupData(gid=gid, display_name=displayname, members=members)
+            members = [none_str(uid) for uid, in member_cursor]
+            yield GroupData(gid=none_str(gid), display_name=none_str(displayname), members=members)
         group_cursor.close()
         member_cursor.close()
 
