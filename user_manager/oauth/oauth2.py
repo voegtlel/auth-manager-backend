@@ -386,10 +386,10 @@ class OpenIDSessionState:
 
 
 # support all openid grants
-authorization.register_grant(AuthorizationCodeGrant, [OpenIDCode(require_nonce=True), OpenIDSessionState()])
+authorization.register_grant(AuthorizationCodeGrant, [OpenIDCode(), OpenIDSessionState()])
 authorization.register_grant(OpenIDImplicitGrant)
 authorization.register_grant(OpenIDHybridGrant)
-authorization.register_grant(RefreshTokenGrant, [OpenIDCode(require_nonce=True), OpenIDSessionState()])
+authorization.register_grant(RefreshTokenGrant, [OpenIDCode(), OpenIDSessionState()])
 authorization.register_grant(ResourceOwnerPasswordCredentialsGrant)
 
 
