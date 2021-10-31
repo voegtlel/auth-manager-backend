@@ -34,6 +34,7 @@ from .session_helper import (
 router = APIRouter()
 
 authorize_static_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'authorize.html')
+logo_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'logo.png')
 
 
 class OAuthAuthorizeRequestQueryParams:
@@ -199,3 +200,16 @@ async def authorize(
         update_session_state(resp, oauth_request.user)
         return resp
     assert False
+
+
+@router.get(
+    '/logo.png',
+    tags=['OAuth2 Provider: Authorize'],
+    responses={
+        200: {
+            "content": {"image/png": {}},
+        },
+    },
+)
+async def get_login_status_iframe():
+    return FileResponse(logo_path, media_type='image/png')
