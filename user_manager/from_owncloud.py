@@ -64,21 +64,24 @@ class DatabaseReader:
             f"SELECT gid FROM {self.prefix}group_user WHERE uid = %s"
         )
 
+        def none_str(x):
+            return x if x is None else str(x)
+
         for uid, displayname, password, data in user_cursor:
             account = json.loads(data)
             preferences_cursor.execute(preferences_query, (uid,))
             if password and len(password) > 2 and password[1] == '|':
                 password = password[2:]
             groups_cursor.execute(groups_query, (uid,))
-            groups = [gid for gid, in groups_cursor]
+            groups = [str(gid) for gid, in groups_cursor]
             profile = UserData(
                 uid=uid,
                 display_name=displayname or account.get('displayname', {}).get('value'),
                 password=password,
-                address=account.get('address', {}).get('value'),
-                email=account.get('email', {}).get('value'),
+                address=none_str(account.get('address', {}).get('value')),
+                email=none_str(account.get('email', {}).get('value')),
                 email_verified=account.get('email', {}).get('verified', "0") != "0",
-                phone=account.get('phone', {}).get('value'),
+                phone=none_str(account.get('phone', {}).get('value')),
                 groups=groups,
             )
             for appid, configkey, configvalue in preferences_cursor:
@@ -232,10 +235,12 @@ if __name__ == '__main__':
 
         if args.keep_ids:
             existing_user = mongo.user_collection.find_one(
-                {'$or': [{'email': user.email}, {'_id': user.uid}]}, {'_id': 1, 'groups': 1, 'name': 1}
+                {'$or': [{'email': user.email}, {'preferred_username': user.uid}]}, {'_id': 1, 'groups': 1, 'name': 1}
             )
+            print(f"Searching email={user.email!r} and preferred_username={user.uid!r} -> {existing_user}")
         else:
             existing_user = mongo.user_collection.find_one({'email': user.email}, {'_id': 1, 'groups': 1, 'name': 1})
+            print(f"Searching email={user.email!r} -> {existing_user}")
         if existing_user is not None:
             existing_user_id = existing_user['_id']
             if args.overwrite:
