@@ -1,16 +1,17 @@
-from datetime import datetime, timezone
 from typing import Any, Dict
-from uuid import uuid4
 
+import time
+from authlib.oidc.core.grants.util import generate_id_token
 from fastapi import APIRouter, Body, HTTPException, Depends
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from user_manager.common.models import DbUser, DbUserHistory, DbChange
-from user_manager.common.mongo import async_user_collection, async_user_history_collection
-from user_manager.oauth.oauth2 import authorization, ErrorJSONResponse, RedirectResponse, user_introspection
+from user_manager.common.config import config
+from user_manager.common.models import DbUser
+from user_manager.common.mongo import async_user_collection
+from user_manager.oauth.oauth2 import authorization, ErrorJSONResponse, RedirectResponse, JwtConfigMixin
 from user_manager.oauth.user_helper import UserWithRoles
 from .ext_auth_base import AuthenticateClient
 from .oauth2_helper import oauth2_request
@@ -23,6 +24,10 @@ client_auth = AuthenticateClient('*ext_card_auth')
 
 class CardModel(BaseModel):
     card_id: str
+
+
+class CardAuthModel(BaseModel):
+    update_token: str
 
 
 @router.post(
@@ -60,28 +65,31 @@ async def authorize_card(
     assert not isinstance(resp, JSONResponse)
 
 
+class UpdateTokenGenerator(JwtConfigMixin):
+    jwt_token_expiration = config.oauth2.token_expiration.update_token
+
+    def __call__(self, update: dict):
+        jwt_config = self.get_jwt_config()
+        jwt_config['auth_time'] = int(time.time())
+        jwt_config['aud'] = 'update'
+
+        return generate_id_token({}, update, **jwt_config)
+
+
+update_token_gen = UpdateTokenGenerator()
+
+
 @router.put(
     '/card/register',
     tags=['Extension: Card Authentication'],
-    response_model=Dict[str, Any],
+    response_model=CardAuthModel,
     dependencies=[Depends(client_auth)],
 )
 async def register_card(
-        request: Request,
         card: CardModel = Body(...),
-):
-    """Set card ID for authorized user."""
-    oauth_request = await oauth2_request(request)
-    response = await user_introspection.create_response(oauth_request)
-    if isinstance(response, ErrorJSONResponse):
-        return response
-    if not oauth_request.user.user.active:
-        raise HTTPException(400, "User not active")
-    await async_user_history_collection.insert_one(DbUserHistory(
-        id=str(uuid4()),
-        user_id=oauth_request.user.user.id,
-        timestamp=datetime.utcnow().replace(tzinfo=timezone.utc),
-        author_id=oauth_request.user.user.id,
-        changes=[DbChange(property='card_id', value=card.card_id)],
-    ).dict(by_alias=True, exclude_none=True))
-    await async_user_collection.update_one({'_id': oauth_request.user.user.id}, {'card_id': card.card_id})
+) -> CardAuthModel:
+    """Creates an update token for setting card ID. The token may be used with user authentication in the manager to
+    update the user."""
+    update_command = {'card_id': card.card_id}
+    token = update_token_gen(update_command)
+    return CardAuthModel(update_token=token)

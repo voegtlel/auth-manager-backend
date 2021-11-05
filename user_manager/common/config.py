@@ -95,6 +95,9 @@ class OAuth2TokenExpiration(BaseModel):
     client_credentials: int = 60 * 60 * 24
     session: int = 60 * 60 * 24 * 365
 
+    # Used to create update tokens, although not part of oauth2 spec
+    update_token: int = 60 * 10
+
 
 class OAuth2ClientConfig(BaseModel):
     client_id: str
