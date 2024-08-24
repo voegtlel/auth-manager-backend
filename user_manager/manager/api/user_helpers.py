@@ -328,6 +328,7 @@ async def update_user(
             is_valid, _ = verify_and_update(update_data['old_password'], user_data['password'])
             if not is_valid:
                 raise HTTPException(401, "Old password does not match")
+            del update_data['old_password']
         try:
             user_data['password'] = create_password(update_data['password'])
             del update_data['password']
