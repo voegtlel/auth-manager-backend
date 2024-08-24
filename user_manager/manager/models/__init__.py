@@ -3,7 +3,7 @@ from .schema import (
 )
 from .user import (
     UserPropertyWithValue, UserViewData, UserViewDataGroup, PasswordInWrite, UserListProperty,
-    UserListViewData, UsersListViewData, PasswordResetResult, PasswordReset
+    UserListViewData, UsersListViewData, UserUpdateResult, PasswordReset
 )
 from .user_view import UserViewInRead, UserViewInWrite, UserViewInList, UserViewGroup, UserFilter
 from .user_history import UserHistoryInList, UserHistoryChange

@@ -24,7 +24,7 @@ from user_manager.manager.auth import Authentication
 from user_manager.manager.helper import DotDict
 from user_manager.manager.models import UserListViewData, UserListProperty, \
     UserViewData, UserPropertyWithValue, PasswordInWrite, UserProperty, \
-    PasswordReset, UserViewDataGroup, UsersListViewData, PasswordResetResult
+    PasswordReset, UserViewDataGroup, UsersListViewData, UserUpdateResult
 
 router = APIRouter()
 
@@ -245,13 +245,12 @@ async def verify_email(
 @router.post(
     '/users/{user_id}/reset-password',
     tags=['User Manager'],
-    response_model=PasswordResetResult,
+    response_model=UserUpdateResult,
 )
 async def request_reset_user_password(
     user_id: str,
-    return_link: bool = Query(False),
     user: UserInfo = Depends(Authentication()),
-) -> PasswordResetResult:
+) -> UserUpdateResult:
     is_admin = 'admin' in user['roles']
     if not is_admin:
         raise HTTPException(401)
@@ -260,7 +259,7 @@ async def request_reset_user_password(
     if user_data is None:
         raise HTTPException(404, "User not found")
     if user_data.get('registration_token'):
-        await update_resend_registration(user_data, schema, user.sub)
+        link = await update_resend_registration(user_data, schema, user.sub)
     else:
         token_valid_until = int(time.time() + config.manager.token_valid.password_reset)
         user_data['password_reset_token'] = create_token(user_data['_id'], token_valid_until)
@@ -270,11 +269,8 @@ async def request_reset_user_password(
                 'password_reset_token': user_data['password_reset_token']
             },
         })
-        if not return_link:
-            await async_send_mail_reset_password(user_data, schema, token_valid_until, author_id=user.sub)
-    return PasswordResetResult(
-        reset_link=f"{config.manager.frontend_base_url}/reset-password/{user_data['password_reset_token']}" if return_link else None,
-    )
+        link = await async_send_mail_reset_password(user_data, schema, token_valid_until, author_id=user.sub)
+    return UserUpdateResult(link=link)
 
 
 @router.post(
@@ -289,7 +285,7 @@ async def request_reset_password(
         return
     schema = await async_read_schema()
     if user_data.get('registration_token'):
-        await update_resend_registration(user_data, schema, user_data['_id'])
+        link = await update_resend_registration(user_data, schema, user_data['_id'])
     else:
         token_valid_until = int(time.time() + config.manager.token_valid.password_reset)
         user_data['password_reset_token'] = create_token(user_data['_id'], token_valid_until)
@@ -299,7 +295,7 @@ async def request_reset_password(
                 'password_reset_token': user_data['password_reset_token']
             },
         })
-        await async_send_mail_reset_password(user_data, schema, token_valid_until)
+        link = await async_send_mail_reset_password(user_data, schema, token_valid_until)
 
 
 @router.put(
@@ -365,30 +361,33 @@ async def save_register_user(
     '/users',
     tags=['User Manager'],
     status_code=201,
+    response_model=UserUpdateResult,
 )
 async def create_user(
         no_registration: bool = Query(False),
         create_data: Dict[str, Any] = Body(...),
         user: UserInfo = Depends(Authentication())
-):
+) -> UserUpdateResult:
     """Updates user data."""
     is_admin = 'admin' in user['roles']
     if not is_admin:
         raise HTTPException(401)
 
     user_data = DotDict()
-    await _update_user(user_data, create_data, user.sub, is_new=True, is_admin=True, no_registration=no_registration)
+    link = await _update_user(user_data, create_data, user.sub, is_new=True, is_admin=True, no_registration=no_registration)
+    return UserUpdateResult(link=link)
 
 
 @router.patch(
     '/users/{user_id}',
-    tags=['User Manager']
+    tags=['User Manager'],
+    response_model=UserUpdateResult,
 )
 async def update_user(
         user_id: str,
         update_data: Dict[str, Any] = Body(...),
         user: UserInfo = Depends(Authentication())
-):
+) -> UserUpdateResult:
     """Updates user data."""
     is_admin = 'admin' in user['roles']
     is_self = user.sub == user_id
@@ -399,17 +398,21 @@ async def update_user(
         raise HTTPException(404)
     if not update_data:
         return
-    await _update_user(user_data, update_data, user.sub, is_admin=is_admin, is_self=is_self)
+    link = await _update_user(user_data, update_data, user.sub, is_admin=is_admin, is_self=is_self)
+    if not is_admin:
+        link = None
+    return UserUpdateResult(link=link)
 
 
 @router.post(
     '/users/{user_id}/reverify-email',
-    tags=['User Manager']
+    tags=['User Manager'],
+    response_model=UserUpdateResult,
 )
 async def reverify_email(
         user_id: str,
         user: UserInfo = Depends(Authentication()),
-):
+) -> UserUpdateResult:
     """Updates user data."""
     is_admin = 'admin' in user['roles']
     is_self = user.sub == user_id
@@ -419,17 +422,21 @@ async def reverify_email(
     if user_data is None:
         raise HTTPException(404)
     user_data['email_verified'] = False
-    await _update_user(user_data, {'email': user_data['email']}, user.sub, is_admin=is_admin, is_self=is_self)
+    link = await _update_user(user_data, {'email': user_data['email']}, user.sub, is_admin=is_admin, is_self=is_self)
+    if not is_admin:
+        link = None
+    return UserUpdateResult(link=link)
 
 
 @router.post(
     '/users/{user_id}/resend-registration',
-    tags=['User Manager']
+    tags=['User Manager'],
+    response_model=UserUpdateResult,
 )
 async def resend_registration(
         user_id: str,
         user: UserInfo = Depends(Authentication()),
-):
+) -> UserUpdateResult:
     """Sends the registration token email again."""
     is_admin = 'admin' in user['roles']
     if not is_admin:
@@ -437,7 +444,8 @@ async def resend_registration(
     user_data = DotDict.from_obj(await async_user_collection.find_one({'_id': user_id}))
     if user_data is None:
         raise HTTPException(404)
-    await update_resend_registration(user_data, await async_read_schema(), user.sub)
+    link = await update_resend_registration(user_data, await async_read_schema(), user.sub)
+    return UserUpdateResult(link=link)
 
 
 @router.post(

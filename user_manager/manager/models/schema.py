@@ -25,6 +25,7 @@ class UserProperty(BaseModel):
     values: Optional[List[EnumValue]]
     template: Optional[str]
     required: Optional[bool]
+    new_required: Optional[bool]
 
     protected: bool = False
 

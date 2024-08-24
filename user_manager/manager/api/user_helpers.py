@@ -80,6 +80,7 @@ async def async_send_mail_register(
         )
     else:
         history_entry.changes.append(DbChange(property='email', value="Sent Registration E-Mail"))
+    return f"{config.manager.frontend_base_url}/register/{user_data['registration_token']}"
 
 
 async def async_send_mail_verify(
@@ -90,7 +91,7 @@ async def async_send_mail_verify(
         tz: datetime.tzinfo,
         author_id: str = None,
         history_entry: DbUserHistory = None,
-):
+) -> str:
     if locale is None:
         locale = user_data.get('locale', 'en_us'),
     await mailer.async_send_mail(
@@ -119,6 +120,7 @@ async def async_send_mail_verify(
         history_entry.changes.append(
             DbChange(property='email', value="Sent E-Mail Verification E-Mail")
         )
+    return f"{config.manager.frontend_base_url}/verify-email/{user_data['email_verification_token']}"
 
 
 async def async_send_mail_reset_password(
@@ -127,7 +129,7 @@ async def async_send_mail_reset_password(
         token_valid_until: int,
         tz: datetime.tzinfo = None,
         author_id: str = None,
-):
+) -> str:
     if tz is None:
         tz = schema.get_tz(user_data.get('zoneinfo'))
     await mailer.async_send_mail(
@@ -151,6 +153,7 @@ async def async_send_mail_reset_password(
             ],
         ).dict(by_alias=True, exclude_none=True)
     )
+    return f"{config.manager.frontend_base_url}/reset-password/{user_data['password_reset_token']}"
 
 
 def create_token(data: str, valid_until: int):
@@ -185,7 +188,7 @@ async def update_resend_registration(
         user_data: DotDict,
         schema: DbManagerSchema,
         author_id: str,
-):
+) -> str:
     token_valid_until = int(time.time() + config.manager.token_valid.registration)
     user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
     await async_user_collection.update_one({'_id': user_data['_id']}, {
@@ -195,7 +198,7 @@ async def update_resend_registration(
         }
     })
     await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
-    await async_send_mail_register(user_data, schema, token_valid_until, author_id=author_id)
+    return await async_send_mail_register(user_data, schema, token_valid_until, author_id=author_id)
 
 
 def validate_property_write(schema: DbManagerSchema, key: str, is_self: bool, is_admin: bool):
@@ -296,7 +299,7 @@ async def update_user(
         is_self: bool = False,
         no_registration: bool = False,
         schema: DbManagerSchema = None,
-):
+) -> Optional[str]:
     if 'sub' in update_data or 'id' in update_data or '_id' in update_data or 'picture' in update_data:
         raise HTTPException(400, f"Cannot modify 'sub', 'id', '_id' or 'picture'")
     was_active = user_data.get('active', False)
@@ -367,7 +370,7 @@ async def update_user(
             user_data['registration_token'] = create_token(user_data['_id'], token_valid_until)
 
             async def send_mail():
-                await async_send_mail_register(
+                return await async_send_mail_register(
                     user_data,
                     schema,
                     token_valid_until,
@@ -376,7 +379,7 @@ async def update_user(
                     author_id=author_user_id,
                     history_entry=history_entry,
                 )
-        elif not is_admin:
+        else:
             token_valid_until = int(time.time() + config.manager.token_valid.email_set)
             user_data['email_verification_token'] = create_token(new_mail, token_valid_until)
             if is_registering:
@@ -384,7 +387,7 @@ async def update_user(
                 user_data['email_verified'] = False
 
             async def send_mail():
-                await async_send_mail_verify(
+                return await async_send_mail_verify(
                     locale,
                     new_mail,
                     user_data,
@@ -393,9 +396,6 @@ async def update_user(
                     author_id=author_user_id,
                     history_entry=history_entry
                 )
-        else:
-            user_data['email'] = new_mail
-            user_data['email_verified'] = False
 
     if 'access_tokens' in update_data:
         if not isinstance(update_data['access_tokens'], list):
@@ -589,6 +589,11 @@ async def update_user(
         user_data['active'] = True
         history_entry.changes.append(DbChange(property='active', value=True))
 
+    if is_new:
+        # Validate that all required variables are present
+        for key, value in schema.properties_by_key.items():
+            if value.new_required and user_data.get(key) is None:
+                raise HTTPException(400, f"Missing {repr(key)}")
     # Apply all templates and validate required, when not active
     if user_data.get('active', False):
         # Validate that all required variables are present
@@ -635,4 +640,4 @@ async def update_user(
     elif reset_user_cache:
         await async_client_user_cache_collection.delete_many({'user_id': user_data['_id']})
     # Last: Send the email if there is one
-    await send_mail()
+    return await send_mail()

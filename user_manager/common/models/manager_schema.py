@@ -60,6 +60,7 @@ class DbUserProperty(BaseSubDocument):
     values: Optional[List[DbEnumValue]]
     template: Optional[str]
     required: Optional[bool]
+    new_required: Optional[bool]
 
     protected: bool = False
 

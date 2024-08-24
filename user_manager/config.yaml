@@ -2,16 +2,16 @@ mongo:
   uri: mongodb://127.0.0.1:27017/db
 
 oauth2:
-  base_url: "http://127.0.0.1:8000"
-  mail_domain: "localhost.localdomain"
-  mail_api_key: "0123456789"
+  base_url: 'http://127.0.0.1:8000'
+  mail_domain: 'localhost.localdomain'
+  mail_api_key: '0123456789'
   keys:
     - key_file: key.private
       algorithm: RS256
       use: sig
       publish: true
       id: 'RS256'
-  issuer: "http://127.0.0.1:8000"
+  issuer: 'http://127.0.0.1:8000'
 
   card_authentication_api_key:
   card_authentication_client_id:
@@ -38,16 +38,15 @@ oauth2:
     skip_private: true
 
   password:
-    schemes: [ 'argon2', 'bcrypt', 'pbkdf2_sha256' ]
+    schemes: ['argon2', 'bcrypt', 'pbkdf2_sha256']
     pwned_password_check: true
 
-
 manager:
-  backend_cors_origin: []
+  backend_cors_origin: ['http://127.0.0.1:4200']
   backend_base_url: http://127.0.0.1:8000/manager
   frontend_base_url: http://127.0.0.1:4200
   secret_key: 'blablabla'
-  name: "User Manager"
+  name: 'User Manager'
 
   token_valid:
     # registration: 86400
@@ -61,7 +60,7 @@ manager:
 
   mail:
     host: localhost
-    sender: "admin@localhost"
+    sender: 'admin@localhost'
     port: null
     ssl: false
     starttls: false

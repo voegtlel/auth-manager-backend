@@ -46,5 +46,5 @@ class PasswordInWrite(BaseModel):
     password: str
 
 
-class PasswordResetResult(BaseModel):
-    reset_link: Optional[str] = None
+class UserUpdateResult(BaseModel):
+    link: Optional[str] = None
