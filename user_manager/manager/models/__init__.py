@@ -2,7 +2,8 @@ from .schema import (
     ManagerSchema, GroupType, UserScope, UserScopeProperty, UserProperty, EnumValue
 )
 from .user import (
-    UserPropertyWithValue, UserViewData, UserViewDataGroup, PasswordInWrite, UserListProperty, UserListViewData
+    UserPropertyWithValue, UserViewData, UserViewDataGroup, PasswordInWrite, UserListProperty,
+    UserListViewData, UsersListViewData, PasswordResetResult, PasswordReset
 )
 from .user_view import UserViewInRead, UserViewInWrite, UserViewInList, UserViewGroup, UserFilter
 from .user_history import UserHistoryInList, UserHistoryChange

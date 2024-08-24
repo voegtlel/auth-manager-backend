@@ -23,8 +23,8 @@ from user_manager.manager.api.user_helpers import check_token, update_user as _u
 from user_manager.manager.auth import Authentication
 from user_manager.manager.helper import DotDict
 from user_manager.manager.models import UserListViewData, UserListProperty, \
-    UserViewData, UserPropertyWithValue, PasswordInWrite, UserProperty
-from user_manager.manager.models.user import PasswordReset, UserViewDataGroup, UsersListViewData
+    UserViewData, UserPropertyWithValue, PasswordInWrite, UserProperty, \
+    PasswordReset, UserViewDataGroup, UsersListViewData, PasswordResetResult
 
 router = APIRouter()
 
@@ -245,11 +245,13 @@ async def verify_email(
 @router.post(
     '/users/{user_id}/reset-password',
     tags=['User Manager'],
+    response_model=PasswordResetResult,
 )
 async def request_reset_user_password(
     user_id: str,
+    return_link: bool = Query(False),
     user: UserInfo = Depends(Authentication()),
-):
+) -> PasswordResetResult:
     is_admin = 'admin' in user['roles']
     if not is_admin:
         raise HTTPException(401)
@@ -268,7 +270,11 @@ async def request_reset_user_password(
                 'password_reset_token': user_data['password_reset_token']
             },
         })
-        await async_send_mail_reset_password(user_data, schema, token_valid_until, author_id=user.sub)
+        if not return_link:
+            await async_send_mail_reset_password(user_data, schema, token_valid_until, author_id=user.sub)
+    return PasswordResetResult(
+        reset_link=f"{config.manager.frontend_base_url}/reset-password/{user_data['password_reset_token']}" if return_link else None,
+    )
 
 
 @router.post(

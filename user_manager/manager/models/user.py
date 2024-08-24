@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -44,3 +44,7 @@ class PasswordReset(BaseModel):
 
 class PasswordInWrite(BaseModel):
     password: str
+
+
+class PasswordResetResult(BaseModel):
+    reset_link: Optional[str] = None
