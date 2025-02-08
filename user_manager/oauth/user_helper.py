@@ -220,7 +220,11 @@ class UserWithRoles(BaseModel):
         return UserWithRoles(user=user, roles=group_data['roles'], last_modified=group_data['last_modified'])
 
     @staticmethod
-    async def async_load_all(client_id: str, load_roles: bool) -> List['UserWithRoles']:
+    async def async_load_all(
+        client_id: str,
+        load_roles: bool,
+        since_modification: Optional[int] = None,
+    ) -> List['UserWithRoles']:
         client = await async_client_collection.find_one({'_id': client_id}, {'_id': 0, 'access_groups': 1})
         if client is None:
             raise HTTPException(400, "Invalid client")
@@ -233,11 +237,17 @@ class UserWithRoles(BaseModel):
             all_client_group_maps.keys()
         )
 
+        query = {
+            'groups': {'$in': list(all_client_groups)},
+            'active': True,
+        }
+
+        if since_modification is not None:
+            query['updated_at'] = {'$ge', since_modification}
+
         users = [
             DbUser.validate_document(user_data)
-            async for user_data in async_user_collection.find({
-                'groups': {'$in': list(all_client_groups)}, 'active': True
-            })
+            async for user_data in async_user_collection.find(query)
         ]
 
         result = []

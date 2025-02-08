@@ -46,6 +46,7 @@ from . import oauth2_key
 from .user_helper import UserWithRoles
 
 USERS_SCOPE = '*users'
+EDGE_SYNC_SCOPE = '*edge_sync'
 
 
 class TypedRequest(OAuth2Request):
@@ -514,6 +515,36 @@ class OtherUsersInspection(UserInfoMixin):
             return authorization.handle_error_response(request, error)
 
 
+class EdgeSync(UserInfoMixin):
+    async def create_response(self, request: TypedRequest, since_modification: Optional[datetime] = None) -> Response:
+        try:
+            assert isinstance(request, OAuth2Request)
+            if request.client is None:
+                request.token = await run_in_threadpool(resource_protector.validate_request, None, request)
+                if request.token is None:
+                    raise HTTPException(403, "Invalid token")
+                client_id = request.token.client_id
+                scopes = request.token.scope
+                scope = EDGE_SYNC_SCOPE
+                load_roles = False
+            else:
+                client_id = request.client_id
+                scopes = request.client.allowed_scope
+                scope = scopes
+                load_roles = True
+            if EDGE_SYNC_SCOPE not in scope_to_list(scopes):
+                raise InsufficientScopeError(f'Missing "{EDGE_SYNC_SCOPE}" scope', request.uri)
+            user_infos = []
+            for user in await UserWithRoles.async_load_all(client_id, load_roles=load_roles, since_modification=since_modification):
+                user_info = await self.async_generate_user_info(user, scope)
+                if not load_roles:
+                    del user_info['roles']
+                user_infos.append(user_info)
+            return JSONResponse(user_infos)
+        except OAuth2Error as error:
+            return authorization.handle_error_response(request, error)
+
+
 class TypeHint(str, Enum):
     AccessToken = "access_token"
     RefreshToken = "refresh_token"
@@ -557,3 +588,4 @@ request_origin_verifier = RequestOriginVerifier()
 
 other_user_inspection = OtherUserInspection()
 other_users_inspection = OtherUsersInspection()
+edge_sync = EdgeSync()

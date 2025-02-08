@@ -487,6 +487,12 @@ default_schema = DbManagerSchema(
             protected=True,
             properties=[],
         ),
+        DbUserScope(
+            key='*edge_sync',
+            title='Edge Synchronization',
+            protected=True,
+            properties=[],
+        ),
     ],
     group_types=[
         DbGroupType(key='management', title="Management"),
